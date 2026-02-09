@@ -1,0 +1,132 @@
+# Gather Platform — Local Development
+# All services on one network. Ports exposed for local dev.
+# Production uses docker-compose.prod.yml overrides.
+
+services:
+  # === Shared Infrastructure ===
+
+  mysql:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - gather_net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  tinode:
+    image: tinode/tinode-mysql:latest
+    ports:
+      - "6060:6060"      # WebSocket
+      - "16060:16060"    # gRPC
+    environment:
+      EXT_CONFIG: /tinode.conf
+      WAIT_FOR: mysql:3306
+      RESET_DB: ${RESET_DB:-false}
+    volumes:
+      - ./shared/tinode/tinode.conf:/tinode.conf:ro
+      - tinode_uploads:/uploads
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - gather_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6060/v0/server/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  pocketbase:
+    # PocketBase runs inside gather-chat's PocketNode for now.
+    # Shared by all services via network. Phase 1 may extract to standalone.
+    # See gather-chat service below — it hosts PocketBase on :8090.
+    # This is a placeholder reminder, not a real service.
+    profiles: ["standalone-pb"]  # Only starts if explicitly requested
+    image: alpine
+    command: echo "PocketBase runs inside gather-chat PocketNode"
+
+  # === Services ===
+
+  gather-chat:
+    build: ./gather-chat/pocketnode
+    ports:
+      - "8091:8090"    # PocketBase API + Admin UI
+    environment:
+      TINODE_ADDR: tinode:16060
+      TINODE_API_KEY: ${TINODE_API_KEY:-AQEAAAABAAD_rAp4DJh05a1HAwFT3A6K}
+      TINODE_PASSWORD_SECRET: ${TINODE_PASSWORD_SECRET:-agency_tinode_sync_v1}
+      POCKETBASE_ADMIN_EMAIL: ${POCKETBASE_ADMIN_EMAIL}
+      POCKETBASE_ADMIN_PASSWORD: ${POCKETBASE_ADMIN_PASSWORD}
+    volumes:
+      - pocketbase_data:/pb_data
+    depends_on:
+      tinode:
+        condition: service_healthy
+    networks:
+      - gather_net
+
+  gather-agents:
+    # Phase 3: New PocketNode instance for agent social network
+    # For now, this is a placeholder that will be built in Phase 3.
+    build:
+      context: ./gather-agents
+      dockerfile: Dockerfile
+    ports:
+      - "8092:8090"
+    environment:
+      TINODE_ADDR: tinode:16060
+      TINODE_API_KEY: ${TINODE_API_KEY:-AQEAAAABAAD_rAp4DJh05a1HAwFT3A6K}
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY}
+    volumes:
+      - pocketbase_data:/pb_data
+    depends_on:
+      tinode:
+        condition: service_healthy
+    networks:
+      - gather_net
+    profiles: ["agents"]  # Not started by default until Phase 3
+
+  gather-skills:
+    build: ./gather-skills
+    ports:
+      - "3001:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      DATABASE_PATH: /app/data/reskill.db
+      API_URL: http://localhost:3001
+    volumes:
+      - skills_data:/app/data
+    networks:
+      - gather_net
+
+  gather-shop:
+    build: ./gather-shop
+    ports:
+      - "8093:8000"
+    environment:
+      BCH_ADDRESS: ${BCH_ADDRESS}
+      GELATO_API_KEY: ${GELATO_API_KEY}
+    networks:
+      - gather_net
+
+  # nginx not included in dev compose — services accessed directly by port.
+  # Production compose adds nginx for TLS + subdomain routing.
+
+networks:
+  gather_net:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  tinode_uploads:
+  pocketbase_data:
+  skills_data:

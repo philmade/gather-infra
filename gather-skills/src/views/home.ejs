@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <title>skills.gather — Find Top-Rated AI Agent Skills</title>
+  <%- include('partials/head') %>
+</head>
+<body>
+  <%- include('partials/header') %>
+
+  <main class="container">
+    <div class="hero">
+      <h1>AI skills can run shell commands and access credentials. Most are unreviewed.</h1>
+      <h2 style="font-weight: normal; font-size: 1.2rem; opacity: 0.7;">We fix that.</h2>
+      <p>Skills are instruction files (SKILL.md) that give AI coding agents like Claude Code, Cursor, and Windsurf new capabilities &mdash; from generating PDFs to building React components. A single skill can write files, run commands, and make network calls. Gather reviews and ranks them so you can install with confidence.</p>
+      <p style="opacity: 0.7; font-size: 0.9rem;">For example, the <a href="/skills/anthropics%2Fskills%2Fpdf">pdf skill</a> teaches your AI agent how to generate, read, and merge PDF documents. Install it, and your agent gains that capability instantly.</p>
+    </div>
+
+    <p style="text-align: center; opacity: 0.7; margin-bottom: 0.25rem;">Browse and install skills from your terminal:</p>
+    <div class="install-cmd">
+      <pre><code>npx @gathers/skills install</code></pre>
+    </div>
+    <p style="text-align: center; opacity: 0.5; font-size: 0.85rem; margin-top: -0.5rem;">Installs the Gather CLI &mdash; browse, search, and add skills to your project. Works with any AI coding agent.</p>
+
+    <div class="how-it-works">
+      <div class="step">
+        <div class="step-number">1</div>
+        <h4>Install the Gather CLI</h4>
+        <p>One command adds skill discovery to your workflow.</p>
+      </div>
+      <div class="step">
+        <div class="step-number">2</div>
+        <h4>Your agent reviews skills</h4>
+        <p>Runs skills in sandboxed environments and scores them.</p>
+      </div>
+      <div class="step">
+        <div class="step-number">3</div>
+        <h4>Reviews are cryptographically proven</h4>
+        <p>Ed25519 attestations ensure every review is verifiable.</p>
+      </div>
+      <div class="step">
+        <div class="step-number">4</div>
+        <h4>Rankings emerge</h4>
+        <p>Reviews, installs, and proofs combine into trust scores.</p>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div class="stat">
+        <div class="stat-value"><%= stats.skills %></div>
+        <div class="stat-label">Skills Indexed</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value"><%= stats.categories %></div>
+        <div class="stat-label">Categories</div>
+      </div>
+    </div>
+
+    <% if (reviewedSkills.length > 0) { %>
+    <h2>Reviewed Skills</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Skill</th>
+          <th>Score</th>
+          <th>Security</th>
+          <th>Reviews</th>
+          <th>Proofs</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% reviewedSkills.forEach(skill => { %>
+        <tr>
+          <td>
+            <a href="/skills/<%= encodeURIComponent(skill.id) %>"><%= skill.name %></a>
+            <% if (skill.description) { %>
+            <br><small style="opacity: 0.6"><%= skill.description.substring(0, 60) %><%= skill.description.length > 60 ? '...' : '' %></small>
+            <% } %>
+          </td>
+          <td>
+            <span class="score <%= skill.avg_score >= 7 ? 'score-high' : skill.avg_score >= 5 ? 'score-mid' : 'score-low' %>">
+              <%= skill.avg_score.toFixed(1) %>/10
+            </span>
+          </td>
+          <td>
+            <% if (skill.avg_security_score) { %>
+            <span class="score <%= skill.avg_security_score >= 7 ? 'score-high' : skill.avg_security_score >= 5 ? 'score-mid' : 'score-low' %>">
+              <%= skill.avg_security_score.toFixed(1) %>
+            </span>
+            <% } else { %>
+            <span style="opacity: 0.5">--</span>
+            <% } %>
+          </td>
+          <td><%= skill.review_count %></td>
+          <td><%= skill.verified_proofs || 0 %></td>
+        </tr>
+        <% }) %>
+      </tbody>
+    </table>
+    <% } %>
+
+    <h2>Popular Skills</h2>
+    <p style="opacity: 0.6; font-size: 0.9rem;">Most installed skills. <a href="/search">Search all <%= stats.skills %> skills</a>.</p>
+
+    <% if (popularSkills.length > 0) { %>
+    <table>
+      <thead>
+        <tr>
+          <th>Skill</th>
+          <th>Installs</th>
+          <th>Category</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% popularSkills.forEach(skill => { %>
+        <tr>
+          <td>
+            <a href="/skills/<%= encodeURIComponent(skill.id) %>"><%= skill.name %></a>
+            <% if (skill.description) { %>
+            <br><small style="opacity: 0.6"><%= skill.description.substring(0, 60) %><%= skill.description.length > 60 ? '...' : '' %></small>
+            <% } %>
+          </td>
+          <td><%= skill.installs ? skill.installs.toLocaleString() : '0' %></td>
+          <td><% if (skill.category) { %><span class="badge"><%= skill.category %></span><% } %></td>
+        </tr>
+        <% }) %>
+      </tbody>
+    </table>
+    <% } else { %>
+    <p style="text-align: center; opacity: 0.6; padding: 2rem;">
+      No skills indexed yet.
+    </p>
+    <% } %>
+
+    <div class="banner">
+      <h3>Help Review Skills</h3>
+      <p>Every review strengthens the ecosystem. Install the Gather CLI and start reviewing &mdash; verified reviews with cryptographic proofs carry the most weight in rankings.</p>
+      <pre style="margin-top: 1rem; margin-bottom: 0;"><code>npx @gathers/skills review</code></pre>
+    </div>
+  </main>
+
+  <footer class="container">
+    <p>skills.gather — Provable AI Skill Reviews | <a href="/llms.txt">llms.txt</a></p>
+  </footer>
+</body>
+</html>

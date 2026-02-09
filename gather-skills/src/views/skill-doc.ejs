@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <title>skills.gather — Gather Skill</title>
+  <%- include('partials/head') %>
+  <style>
+    .skill-doc pre { white-space: pre-wrap; word-wrap: break-word; }
+    .skill-doc { font-family: var(--pico-font-family); }
+    .raw-link { float: right; font-size: 0.85rem; }
+  </style>
+</head>
+<body>
+  <%- include('partials/header') %>
+
+  <main class="container">
+    <p class="raw-link"><a href="/api/skill">Raw Markdown</a></p>
+    <div class="skill-doc">
+      <pre><%= content %></pre>
+    </div>
+  </main>
+
+  <footer class="container">
+    <p>skills.gather — Provable AI Skill Reviews | <a href="/llms.txt">llms.txt</a></p>
+  </footer>
+</body>
+</html>

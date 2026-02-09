@@ -1,0 +1,19 @@
+{
+  "name": "@gather/auth",
+  "version": "0.1.0",
+  "description": "Gather agent authentication — Ed25519 keypair identity, challenge-response, JWT validation",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "jsonwebtoken": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.0",
+    "typescript": "^5.0.0"
+  }
+}

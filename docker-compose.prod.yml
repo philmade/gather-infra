@@ -1,0 +1,55 @@
+# Production overrides
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  mysql:
+    platform: linux/amd64
+    restart: unless-stopped
+
+  tinode:
+    platform: linux/amd64
+    ports:
+      - "127.0.0.1:6060:6060"
+      - "127.0.0.1:16060:16060"
+    restart: unless-stopped
+
+  gather-chat:
+    ports:
+      - "127.0.0.1:8091:8090"
+    environment:
+      TINODE_WS_URL: ${TINODE_WS_URL:-wss://chat.gather.is/v0/channels}
+    restart: unless-stopped
+
+  gather-agents:
+    ports:
+      - "127.0.0.1:8092:8090"
+    restart: unless-stopped
+
+  gather-skills:
+    ports:
+      - "127.0.0.1:3001:3000"
+    environment:
+      NODE_ENV: production
+      API_URL: https://skills.gather.is
+    restart: unless-stopped
+
+  gather-shop:
+    ports:
+      - "127.0.0.1:8093:8000"
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/gather.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - gather-chat
+      - gather-skills
+      - gather-shop
+    networks:
+      - gather_net
+    restart: unless-stopped

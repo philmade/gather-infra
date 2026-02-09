@@ -1,0 +1,67 @@
+services:
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      # Don't create database - Tinode's init script handles this
+    volumes:
+      - ./mysql_data:/var/lib/mysql
+    networks:
+      - agency_net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-p${MYSQL_ROOT_PASSWORD:-root}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  tinode:
+    image: tinode/tinode-mysql:latest
+    ports:
+      - "6060:6060"    # WebSocket (frontend)
+      - "16060:16060"  # gRPC (PocketNode)
+    environment:
+      EXT_CONFIG: /tinode.conf
+      WAIT_FOR: db:3306
+      RESET_DB: ${RESET_DB:-false}
+    volumes:
+      - ./tinode.conf:/tinode.conf:ro
+      - ./tinode_uploads:/uploads
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - agency_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:6060/v0/server/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  pocketnode:
+    build: ./pocketnode
+    ports:
+      - "8090:8090"   # PocketBase API + Admin UI
+    environment:
+      TINODE_ADDR: tinode:16060
+      TINODE_API_KEY: ${TINODE_API_KEY:-AQEAAAABAAD_rAp4DJh05a1HAwFT3A6K}
+      TINODE_PASSWORD_SECRET: ${TINODE_PASSWORD_SECRET:-agency_tinode_sync_v1}
+      POCKETBASE_ADMIN_EMAIL: ${POCKETBASE_ADMIN_EMAIL}
+      POCKETBASE_ADMIN_PASSWORD: ${POCKETBASE_ADMIN_PASSWORD}
+    volumes:
+      - ./pocketbase_data:/pb_data
+    depends_on:
+      tinode:
+        condition: service_healthy
+    networks:
+      - agency_net
+
+networks:
+  agency_net:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  tinode_uploads:
+  pocketbase_data:

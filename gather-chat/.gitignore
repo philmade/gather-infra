@@ -1,0 +1,31 @@
+# Environment files with secrets
+.env
+
+# Data directories
+mysql_data/
+tinode_uploads/
+pocketbase_data/
+
+# Go build artifacts
+pocketnode/pocketnode
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of coverage
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db

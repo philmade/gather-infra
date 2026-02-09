@@ -1,0 +1,43 @@
+# Environment files with secrets
+.env
+*.env.local
+
+# Data directories
+mysql_data/
+tinode_uploads/
+pocketbase_data/
+**/data/*.db
+**/data/keys.json
+
+# Node
+node_modules/
+dist/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Go build artifacts
+**/pocketnode/pocketnode
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude session data
+.claude/
