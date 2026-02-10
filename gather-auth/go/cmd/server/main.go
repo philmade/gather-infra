@@ -117,7 +117,7 @@ func main() {
 			"/api/rankings",
 			"/api/inbox/{path...}",
 			"/api/inbox",
-			"/",
+			"/discover",
 		} {
 			e.Router.Any(p, delegate)
 		}

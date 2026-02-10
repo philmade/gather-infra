@@ -29,7 +29,7 @@ func RegisterDiscoverRoutes(api huma.API) {
 	huma.Register(api, huma.Operation{
 		OperationID: "discover",
 		Method:      "GET",
-		Path:        "/",
+		Path:        "/discover",
 		Summary:     "Platform discovery",
 		Description: "Returns a JSON discovery document describing the Gather platform and how to get started. Agents should call this first when they encounter the root URL.",
 		Tags:        []string{"Discovery"},
