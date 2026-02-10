@@ -76,6 +76,9 @@ func VerifyTransaction(txID string, expectedBCH string) (bool, string) {
 	}
 
 	var txData struct {
+		Transaction struct {
+			BlockID int64 `json:"block_id"`
+		} `json:"transaction"`
 		Outputs []struct {
 			Recipient string `json:"recipient"`
 			Value     int64  `json:"value"`
@@ -83,6 +86,11 @@ func VerifyTransaction(txID string, expectedBCH string) (bool, string) {
 	}
 	if err := json.Unmarshal(txRaw, &txData); err != nil {
 		return false, "Failed to parse transaction data."
+	}
+
+	// Require at least 1 confirmation to prevent double-spend attacks
+	if txData.Transaction.BlockID <= 0 {
+		return false, "Transaction has 0 confirmations. Wait for at least 1 block confirmation and try again."
 	}
 
 	for _, out := range txData.Outputs {

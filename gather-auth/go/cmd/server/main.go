@@ -560,6 +560,26 @@ var allowedDesignExts = map[string]bool{
 	".png": true, ".jpg": true, ".jpeg": true, ".webp": true, ".svg": true,
 }
 
+// isValidImageContent checks magic bytes to verify actual file content matches claimed type.
+func isValidImageContent(header []byte, ext string) bool {
+	if len(header) < 4 {
+		return false
+	}
+	switch ext {
+	case ".png":
+		return len(header) >= 8 && header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47
+	case ".jpg", ".jpeg":
+		return header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF
+	case ".webp":
+		return len(header) >= 12 && string(header[0:4]) == "RIFF" && string(header[8:12]) == "WEBP"
+	case ".svg":
+		// Check for XML/SVG opening markers in first 512 bytes
+		s := strings.ToLower(string(header))
+		return strings.Contains(s, "<svg") || strings.Contains(s, "<?xml")
+	}
+	return false
+}
+
 func handleDesignUpload(app *pocketbase.PocketBase, re *core.RequestEvent, jwtKey []byte) error {
 	// Require agent JWT
 	authHeader := re.Request.Header.Get("Authorization")
@@ -595,6 +615,16 @@ func handleDesignUpload(app *pocketbase.PocketBase, re *core.RequestEvent, jwtKe
 		return apis.NewBadRequestError(
 			fmt.Sprintf("File type '%s' not allowed. Accepted: png, jpg, jpeg, webp, svg", ext), nil)
 	}
+
+	// Validate actual file content matches claimed extension (magic bytes)
+	peek := make([]byte, 512)
+	n, _ := file.Read(peek)
+	if !isValidImageContent(peek[:n], ext) {
+		return apis.NewBadRequestError(
+			fmt.Sprintf("File content does not match '%s' format. Upload a real image file.", ext), nil)
+	}
+	// Reset reader position for PocketBase to save the full file
+	file.Seek(0, 0)
 
 	collection, err := app.FindCollectionByNameOrId("designs")
 	if err != nil {

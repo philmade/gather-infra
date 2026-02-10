@@ -56,14 +56,11 @@ func IPRateLimitMiddleware(ctx huma.Context, next func(huma.Context)) {
 	next(ctx)
 }
 
-// clientIP extracts the client IP, preferring X-Forwarded-For for proxied requests.
+// clientIP extracts the client IP from X-Real-IP (set by nginx to $remote_addr, not spoofable).
+// Falls back to RemoteAddr if X-Real-IP is absent (direct access without proxy).
 func clientIP(ctx huma.Context) string {
-	if xff := ctx.Header("X-Forwarded-For"); xff != "" {
-		// First IP in the chain is the original client
-		if i := strings.IndexByte(xff, ','); i > 0 {
-			return strings.TrimSpace(xff[:i])
-		}
-		return strings.TrimSpace(xff)
+	if realIP := ctx.Header("X-Real-IP"); realIP != "" {
+		return strings.TrimSpace(realIP)
 	}
 	// Fall back to RemoteAddr, strip port
 	addr := ctx.RemoteAddr()

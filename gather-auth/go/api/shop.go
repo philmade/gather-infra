@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/pocketbase/pocketbase"
@@ -69,16 +70,16 @@ type OrderOutput struct {
 }
 
 type ShippingAddress struct {
-	FirstName    string `json:"first_name" doc:"Recipient first name" minLength:"1"`
-	LastName     string `json:"last_name" doc:"Recipient last name" minLength:"1"`
-	AddressLine1 string `json:"address_line_1" doc:"Street address" minLength:"1"`
-	AddressLine2 string `json:"address_line_2,omitempty" doc:"Apt, suite, etc."`
-	City         string `json:"city" doc:"City" minLength:"1"`
-	State        string `json:"state,omitempty" doc:"State/province"`
-	PostCode     string `json:"post_code" doc:"Postal/ZIP code" minLength:"1"`
+	FirstName    string `json:"first_name" doc:"Recipient first name" minLength:"1" maxLength:"100"`
+	LastName     string `json:"last_name" doc:"Recipient last name" minLength:"1" maxLength:"100"`
+	AddressLine1 string `json:"address_line_1" doc:"Street address" minLength:"1" maxLength:"200"`
+	AddressLine2 string `json:"address_line_2,omitempty" doc:"Apt, suite, etc." maxLength:"200"`
+	City         string `json:"city" doc:"City" minLength:"1" maxLength:"100"`
+	State        string `json:"state,omitempty" doc:"State/province" maxLength:"100"`
+	PostCode     string `json:"post_code" doc:"Postal/ZIP code" minLength:"1" maxLength:"20"`
 	Country      string `json:"country" doc:"ISO 2-letter country code" minLength:"2" maxLength:"2"`
-	Email        string `json:"email" doc:"Contact email for shipping updates" minLength:"1"`
-	Phone        string `json:"phone,omitempty" doc:"Contact phone number"`
+	Email        string `json:"email" doc:"Contact email for shipping updates" minLength:"1" maxLength:"254"`
+	Phone        string `json:"phone,omitempty" doc:"Contact phone number" maxLength:"30"`
 }
 
 type ProductOrderInput struct {
@@ -297,20 +298,24 @@ func RegisterShopRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 		designURL := input.Body.DesignURL
 		if designURL == "" {
 			designURL = cfg.DesignURL
+		} else if !strings.HasPrefix(designURL, "/api/files/designs/") &&
+			!strings.HasPrefix(designURL, "https://gather.is/api/files/designs/") {
+			return nil, huma.Error422UnprocessableEntity(
+				"design_url must be a platform-hosted image from POST /api/designs/upload. External URLs are not accepted.")
 		}
 
-		// Convert shipping to Gelato format
+		// Convert shipping to Gelato format (strip HTML to prevent stored XSS)
 		shipping := map[string]string{
-			"firstName":    input.Body.ShippingAddress.FirstName,
-			"lastName":     input.Body.ShippingAddress.LastName,
-			"addressLine1": input.Body.ShippingAddress.AddressLine1,
-			"addressLine2": input.Body.ShippingAddress.AddressLine2,
-			"city":         input.Body.ShippingAddress.City,
-			"state":        input.Body.ShippingAddress.State,
-			"postCode":     input.Body.ShippingAddress.PostCode,
+			"firstName":    stripHTMLTags(input.Body.ShippingAddress.FirstName),
+			"lastName":     stripHTMLTags(input.Body.ShippingAddress.LastName),
+			"addressLine1": stripHTMLTags(input.Body.ShippingAddress.AddressLine1),
+			"addressLine2": stripHTMLTags(input.Body.ShippingAddress.AddressLine2),
+			"city":         stripHTMLTags(input.Body.ShippingAddress.City),
+			"state":        stripHTMLTags(input.Body.ShippingAddress.State),
+			"postCode":     stripHTMLTags(input.Body.ShippingAddress.PostCode),
 			"country":      input.Body.ShippingAddress.Country,
-			"email":        input.Body.ShippingAddress.Email,
-			"phone":        input.Body.ShippingAddress.Phone,
+			"email":        stripHTMLTags(input.Body.ShippingAddress.Email),
+			"phone":        stripHTMLTags(input.Body.ShippingAddress.Phone),
 		}
 
 		collection, err := app.FindCollectionByNameOrId("orders")
@@ -370,6 +375,11 @@ func RegisterShopRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 		order, err := app.FindRecordById("orders", input.OrderID)
 		if err != nil {
 			return nil, huma.Error404NotFound("Order not found.")
+		}
+
+		// Verify the agent submitting payment owns this order
+		if order.GetString("agent_id") != claims.AgentID {
+			return nil, huma.Error403Forbidden("You can only submit payment for your own orders.")
 		}
 
 		if order.GetBool("paid") {
@@ -490,6 +500,26 @@ func RegisterShopRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 		out.Body.FeedbackID = record.Id
 		return out, nil
 	})
+}
+
+// stripHTMLTags removes HTML tags from a string to prevent stored XSS.
+func stripHTMLTags(s string) string {
+	var result strings.Builder
+	inTag := false
+	for _, r := range s {
+		if r == '<' {
+			inTag = true
+			continue
+		}
+		if r == '>' {
+			inTag = false
+			continue
+		}
+		if !inTag {
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
 }
 
 // containsWord does a simple case-insensitive substring check.
