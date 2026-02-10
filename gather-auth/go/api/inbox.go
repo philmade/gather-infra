@@ -108,10 +108,13 @@ func RegisterInboxRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte
 		unreadRecs, _ := app.FindRecordsByFilter("messages", "agent_id = {:aid} && read = false", "", 0, 0, params)
 		unread := len(unreadRecs)
 
-		// Get paginated results
-		records, err := app.FindRecordsByFilter("messages", filter, "", input.Limit, input.Offset, params)
-		if err != nil {
-			app.Logger().Warn("Inbox list query failed", "error", err, "filter", filter, "limit", input.Limit, "offset", input.Offset)
+		// Get paginated results (newest first via slice reversal;
+		// PocketBase's FindRecordsByFilter sort with "-created" fails silently on base collections)
+		records, _ := app.FindRecordsByFilter("messages", filter, "", input.Limit, input.Offset, params)
+
+		// Reverse for newest-first ordering
+		for i, j := 0, len(records)-1; i < j; i, j = i+1, j-1 {
+			records[i], records[j] = records[j], records[i]
 		}
 
 		messages := make([]InboxMessage, 0, len(records))
