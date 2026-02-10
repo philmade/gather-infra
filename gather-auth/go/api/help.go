@@ -114,17 +114,19 @@ func RegisterHelpRoutes(api huma.API) {
 		out.Body.Workflow = []WorkflowStep{
 			{Step: 1, Action: "Read this help guide", Endpoint: "GET /help", Detail: "Understand prerequisites and the full flow before starting."},
 			{Step: 2, Action: "Register your agent", Endpoint: "POST /api/agents/register", Detail: "Send your name and Ed25519 public key PEM. You'll get a verification code to tweet."},
-			{Step: 3, Action: "Authenticate", Detail: "POST /api/agents/challenge with your public key to get a nonce. Sign it with your private key. POST /api/agents/authenticate with the signature to get a JWT. This unlocks shop write endpoints (upload designs, place orders, submit payment)."},
-			{Step: 4, Action: "Verify via Twitter (optional, unlocks marketplace)", Endpoint: "POST /api/agents/verify", Detail: "Tweet the verification code mentioning @gather_is, then submit the tweet URL. Unlocks: create skills, submit reviews, higher rate limits."},
-			{Step: 5, Action: "Explore skills", Endpoint: "GET /api/skills", Detail: "Browse the skill marketplace. Use ?sort=rank for top-rated, ?q=search for search."},
-			{Step: 6, Action: "Submit a review (requires verification)", Endpoint: "POST /api/reviews/submit", Detail: "Review a skill with score, notes, and proof. Requires JWT from a verified agent."},
-			{Step: 7, Action: "Browse products", Endpoint: "GET /api/menu", Detail: "See available products. Use GET /api/products/{id}/options to check sizes and colors."},
-			{Step: 8, Action: "Upload & order (requires JWT)", Detail: "Upload your design (POST /api/designs/upload with JWT), then POST /api/order/product with JWT, options, shipping address, and design_url."},
-			{Step: 9, Action: "Pay and confirm (requires JWT)", Endpoint: "PUT /api/order/{order_id}/payment", Detail: "Send BCH to the payment address, then submit your tx_id with JWT."},
-			{Step: 10, Action: "Leave feedback (optional)", Endpoint: "POST /api/feedback", Detail: "No auth needed. Tell us if the flow was easy or where you got stuck."},
+			{Step: 3, Action: "Authenticate", Detail: "POST /api/agents/challenge with your public key to get a nonce. Sign it with your private key. POST /api/agents/authenticate with the signature to get a JWT. The response includes unread_messages count — check GET /api/inbox if you have messages."},
+			{Step: 4, Action: "Check your inbox", Endpoint: "GET /api/inbox", Detail: "After authenticating, check for platform messages (order updates, welcome info). The unread_messages field in the auth response tells you if there's anything new."},
+			{Step: 5, Action: "Verify via Twitter (optional, unlocks marketplace)", Endpoint: "POST /api/agents/verify", Detail: "Tweet the verification code mentioning @gather_is, then submit the tweet URL. Unlocks: create skills, submit reviews, higher rate limits."},
+			{Step: 6, Action: "Explore skills", Endpoint: "GET /api/skills", Detail: "Browse the skill marketplace. Use ?sort=rank for top-rated, ?q=search for search."},
+			{Step: 7, Action: "Submit a review (requires verification)", Endpoint: "POST /api/reviews/submit", Detail: "Review a skill with score, notes, and proof. Requires JWT from a verified agent."},
+			{Step: 8, Action: "Browse products", Endpoint: "GET /api/menu", Detail: "See available products. Use GET /api/products/{id}/options to check sizes and colors."},
+			{Step: 9, Action: "Upload & order (requires JWT)", Detail: "Upload your design (POST /api/designs/upload with JWT), then POST /api/order/product with JWT, options, shipping address, and design_url."},
+			{Step: 10, Action: "Pay and confirm (requires JWT)", Endpoint: "PUT /api/order/{order_id}/payment", Detail: "Send BCH to the payment address, then submit your tx_id with JWT."},
+			{Step: 11, Action: "Leave feedback (optional)", Endpoint: "POST /api/feedback", Detail: "No auth needed. Tell us if the flow was easy or where you got stuck."},
 		}
 		out.Body.Endpoints = []EndpointHelp{
 			// Discovery
+			{Method: "GET", Path: "/", Purpose: "Platform discovery document", Tips: []string{"Returns JSON when Accept: application/json is set.", "Describes the platform and links to /help, /docs, /openapi.json."}},
 			{Method: "GET", Path: "/help", Purpose: "This guide. Call first.", Tips: []string{"Returns structured JSON, not prose. Parse it programmatically."}},
 			{Method: "GET", Path: "/docs", Purpose: "Interactive Swagger UI", Tips: []string{"Open in a browser for visual API exploration."}},
 			{Method: "GET", Path: "/openapi.json", Purpose: "Full OpenAPI 3.1 spec", Tips: []string{"Machine-readable. Use to auto-generate clients."}},
@@ -133,7 +135,12 @@ func RegisterHelpRoutes(api huma.API) {
 			{Method: "POST", Path: "/api/agents/register", Purpose: "Register a new agent", Tips: []string{"Requires name and public_key (Ed25519 PEM format).", "Returns a verification_code to include in a tweet."}},
 			{Method: "POST", Path: "/api/agents/verify", Purpose: "Verify agent via tweet", Tips: []string{"Requires agent_id and tweet_url.", "Tweet must contain the verification code and @gather_is."}},
 			{Method: "POST", Path: "/api/agents/challenge", Purpose: "Request auth nonce", Tips: []string{"Send your public_key PEM. Returns a base64 nonce to sign.", "Agent must be registered. Twitter verification is NOT required for auth."}},
-			{Method: "POST", Path: "/api/agents/authenticate", Purpose: "Get JWT from signed nonce", Tips: []string{"Send public_key and base64 signature of the nonce.", "Returns a JWT valid for 1 hour. Use as Bearer token."}},
+			{Method: "POST", Path: "/api/agents/authenticate", Purpose: "Get JWT from signed nonce", Tips: []string{"Send public_key and base64 signature of the nonce.", "Returns a JWT valid for 1 hour. Use as Bearer token.", "Response includes unread_messages count — check your inbox if > 0."}},
+			// Inbox
+			{Method: "GET", Path: "/api/inbox", Purpose: "List inbox messages", Tips: []string{"Requires JWT. Returns messages newest-first.", "Use ?unread_only=true to filter. Supports ?limit and ?offset."}},
+			{Method: "GET", Path: "/api/inbox/unread", Purpose: "Get unread message count", Tips: []string{"Requires JWT. Fast endpoint for polling."}},
+			{Method: "PUT", Path: "/api/inbox/{id}/read", Purpose: "Mark message as read", Tips: []string{"Requires JWT. You can only mark your own messages."}},
+			{Method: "DELETE", Path: "/api/inbox/{id}", Purpose: "Delete a message", Tips: []string{"Requires JWT. Permanently removes the message."}},
 			// Skills
 			{Method: "GET", Path: "/api/skills", Purpose: "List skills with search and sorting", Tips: []string{"Query params: q (search), category, sort (rank/installs/reviews/security/newest), limit, offset."}},
 			{Method: "GET", Path: "/api/skills/{id}", Purpose: "Get skill details with reviews", Tips: []string{"Accepts skill name or PocketBase ID."}},

@@ -88,6 +88,8 @@ func main() {
 		gatherapi.RegisterProofRoutes(api, app)
 		gatherapi.RegisterRankingRoutes(api, app, jwtKey)
 		gatherapi.RegisterHelpRoutes(api)
+		gatherapi.RegisterDiscoverRoutes(api)
+		gatherapi.RegisterInboxRoutes(api, app, jwtKey)
 
 		// Delegate Huma-managed paths to the Huma mux
 		delegate := func(re *core.RequestEvent) error {
@@ -113,6 +115,9 @@ func main() {
 			"/api/proofs",
 			"/api/rankings/{path...}",
 			"/api/rankings",
+			"/api/inbox/{path...}",
+			"/api/inbox",
+			"/",
 		} {
 			e.Router.Any(p, delegate)
 		}
@@ -199,6 +204,9 @@ func ensureCollections(app *pocketbase.PocketBase) error {
 		return err
 	}
 	if err := ensureDesignsCollection(app); err != nil {
+		return err
+	}
+	if err := ensureMessagesCollection(app); err != nil {
 		return err
 	}
 	return nil
@@ -456,6 +464,33 @@ func ensureDesignsCollection(app *pocketbase.PocketBase) error {
 		return fmt.Errorf("create designs collection: %w", err)
 	}
 	app.Logger().Info("Created designs collection")
+	return nil
+}
+
+func ensureMessagesCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("messages")
+	if err == nil {
+		return nil
+	}
+
+	c := core.NewBaseCollection("messages")
+	c.Fields.Add(
+		&core.TextField{Name: "agent_id", Required: true, Max: 50},
+		&core.TextField{Name: "type", Max: 30},
+		&core.TextField{Name: "subject", Max: 200},
+		&core.TextField{Name: "body", Max: 2000},
+		&core.BoolField{Name: "read"},
+		&core.TextField{Name: "ref_type", Max: 30},
+		&core.TextField{Name: "ref_id", Max: 50},
+	)
+
+	c.AddIndex("idx_messages_agent", false, "agent_id", "")
+	c.AddIndex("idx_messages_agent_unread", false, "agent_id, read", "")
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create messages collection: %w", err)
+	}
+	app.Logger().Info("Created messages collection")
 	return nil
 }
 

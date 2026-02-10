@@ -343,6 +343,12 @@ func RegisterShopRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 			return nil, huma.Error500InternalServerError("Failed to create order")
 		}
 
+		SendInboxMessage(app, claims.AgentID, "order_update",
+			fmt.Sprintf("Order %s placed!", formatOrderID(record.Id)),
+			fmt.Sprintf("Your order %s has been created. Send %s BCH to %s, then submit your transaction ID via PUT /api/order/%s/payment.",
+				formatOrderID(record.Id), bchPrice, shop.ShopBCHAddress(), record.Id),
+			"order", record.Id)
+
 		out := &OrderOutput{}
 		out.Status = 201
 		out.Body.OrderID = record.Id
@@ -425,6 +431,12 @@ func RegisterShopRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 			order.Set("status", "fulfilling")
 			app.Save(order)
 		}
+
+		SendInboxMessage(app, claims.AgentID, "order_update",
+			fmt.Sprintf("Payment confirmed for %s", formatOrderID(order.Id)),
+			fmt.Sprintf("Payment verified for order %s. Your item is being printed and will ship soon. Check status at GET /api/order/%s.",
+				formatOrderID(order.Id), order.Id),
+			"order", order.Id)
 
 		out := &PaymentOutput{}
 		out.Body.OrderID = order.Id

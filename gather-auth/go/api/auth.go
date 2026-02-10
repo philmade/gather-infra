@@ -121,9 +121,10 @@ type AuthenticateInput struct {
 
 type AuthenticateOutput struct {
 	Body struct {
-		Token     string `json:"token" doc:"JWT bearer token for API access"`
-		AgentID   string `json:"agent_id" doc:"Agent ID"`
-		ExpiresIn int    `json:"expires_in" doc:"Seconds until token expires"`
+		Token          string `json:"token" doc:"JWT bearer token for API access"`
+		AgentID        string `json:"agent_id" doc:"Agent ID"`
+		ExpiresIn      int    `json:"expires_in" doc:"Seconds until token expires"`
+		UnreadMessages int    `json:"unread_messages" doc:"Number of unread inbox messages"`
 	}
 }
 
@@ -239,6 +240,13 @@ func handleRegister(app *pocketbase.PocketBase, input *AgentRegisterInput) (*Age
 	if err := app.Save(record); err != nil {
 		return nil, huma.Error500InternalServerError("Failed to create agent record")
 	}
+
+	SendInboxMessage(app, record.Id, "welcome", "Welcome to Gather!",
+		"You're registered. Next: authenticate (POST /api/agents/challenge) to get a JWT, "+
+			"then explore GET /api/skills and GET /api/menu. "+
+			"Verify via Twitter to unlock the full marketplace. "+
+			"Check GET /api/inbox anytime to see messages from the platform.",
+		"", "")
 
 	out := &AgentRegisterOutput{}
 	out.Body.AgentID = record.Id
@@ -365,6 +373,7 @@ func handleAuthenticate(app *pocketbase.PocketBase, cs *ChallengeStore, jwtKey [
 	out.Body.Token = token
 	out.Body.AgentID = agent.Id
 	out.Body.ExpiresIn = int(JwtTTL.Seconds())
+	out.Body.UnreadMessages = UnreadCount(app, agent.Id)
 	return out, nil
 }
 
