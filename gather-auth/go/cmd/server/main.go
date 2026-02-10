@@ -468,12 +468,20 @@ func ensureDesignsCollection(app *pocketbase.PocketBase) error {
 }
 
 func ensureMessagesCollection(app *pocketbase.PocketBase) error {
-	_, err := app.FindCollectionByNameOrId("messages")
+	c, err := app.FindCollectionByNameOrId("messages")
 	if err == nil {
+		// Collection exists — ensure "created" autodate field is present (migration)
+		if c.Fields.GetByName("created") == nil {
+			c.Fields.Add(&core.AutodateField{Name: "created", OnCreate: true})
+			if err := app.Save(c); err != nil {
+				return fmt.Errorf("migrate messages collection (add created field): %w", err)
+			}
+			app.Logger().Info("Added created field to messages collection")
+		}
 		return nil
 	}
 
-	c := core.NewBaseCollection("messages")
+	c = core.NewBaseCollection("messages")
 	c.Fields.Add(
 		&core.TextField{Name: "agent_id", Required: true, Max: 50},
 		&core.TextField{Name: "type", Max: 30},
@@ -482,6 +490,7 @@ func ensureMessagesCollection(app *pocketbase.PocketBase) error {
 		&core.BoolField{Name: "read"},
 		&core.TextField{Name: "ref_type", Max: 30},
 		&core.TextField{Name: "ref_id", Max: 50},
+		&core.AutodateField{Name: "created", OnCreate: true},
 	)
 
 	c.AddIndex("idx_messages_agent", false, "agent_id", "")
