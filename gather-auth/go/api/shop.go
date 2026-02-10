@@ -10,6 +10,7 @@ import (
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 
+	"gather.is/auth/ratelimit"
 	"gather.is/auth/shop"
 )
 
@@ -81,7 +82,8 @@ type ShippingAddress struct {
 }
 
 type ProductOrderInput struct {
-	Body struct {
+	Authorization string `header:"Authorization" doc:"Bearer JWT token" required:"true"`
+	Body          struct {
 		ProductID       string            `json:"product_id" doc:"Product ID from /menu/products" minLength:"1"`
 		Options         map[string]string `json:"options" doc:"Product options (size, color, etc.)"`
 		ShippingAddress ShippingAddress   `json:"shipping_address"`
@@ -90,8 +92,9 @@ type ProductOrderInput struct {
 }
 
 type PaymentInput struct {
-	OrderID string `path:"order_id" doc:"Order ID to pay for"`
-	Body    struct {
+	Authorization string `header:"Authorization" doc:"Bearer JWT token" required:"true"`
+	OrderID       string `path:"order_id" doc:"Order ID to pay for"`
+	Body          struct {
 		TxID string `json:"tx_id" doc:"BCH transaction ID (64-char hex hash)" minLength:"64" maxLength:"64"`
 	}
 }
@@ -114,6 +117,7 @@ type OrderStatusOutput struct {
 		OrderID        string            `json:"order_id"`
 		Status         string            `json:"status"`
 		OrderType      string            `json:"order_type" doc:"'product'"`
+		AgentID        string            `json:"agent_id,omitempty" doc:"Agent that placed the order"`
 		TotalBCH       string            `json:"total_bch"`
 		PaymentAddress string            `json:"payment_address"`
 		Paid           bool              `json:"paid"`
@@ -148,7 +152,7 @@ type FeedbackOutput struct {
 // Route registration
 // -----------------------------------------------------------------------------
 
-func RegisterShopRoutes(api huma.API, app *pocketbase.PocketBase) {
+func RegisterShopRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte) {
 	// --- Menu ---
 
 	huma.Register(api, huma.Operation{
@@ -253,6 +257,17 @@ func RegisterShopRoutes(api huma.API, app *pocketbase.PocketBase) {
 		Tags:          []string{"Orders"},
 		DefaultStatus: 201,
 	}, func(ctx context.Context, input *ProductOrderInput) (*OrderOutput, error) {
+		claims, err := RequireJWT(input.Authorization, jwtKey)
+		if err != nil {
+			return nil, err
+		}
+
+		agent, _ := app.FindRecordById("agents", claims.AgentID)
+		verified := agent != nil && agent.GetBool("verified")
+		if err := ratelimit.CheckAgent(claims.AgentID, verified); err != nil {
+			return nil, err
+		}
+
 		cfg := shop.GetProduct(input.Body.ProductID)
 		if cfg == nil {
 			return nil, huma.Error422UnprocessableEntity(
@@ -309,6 +324,7 @@ func RegisterShopRoutes(api huma.API, app *pocketbase.PocketBase) {
 		record := core.NewRecord(collection)
 		record.Set("order_type", "product")
 		record.Set("status", "awaiting_payment")
+		record.Set("agent_id", claims.AgentID)
 		record.Set("product_id", input.Body.ProductID)
 		record.Set("product_options", string(optionsJSON))
 		record.Set("shipping_address", string(shippingJSON))
@@ -340,6 +356,17 @@ func RegisterShopRoutes(api huma.API, app *pocketbase.PocketBase) {
 		Description: "Verify a BCH payment against the blockchain via Blockchair. Payment triggers real fulfillment via Gelato — the item will be printed and shipped.",
 		Tags:        []string{"Orders"},
 	}, func(ctx context.Context, input *PaymentInput) (*PaymentOutput, error) {
+		claims, err := RequireJWT(input.Authorization, jwtKey)
+		if err != nil {
+			return nil, err
+		}
+
+		agent, _ := app.FindRecordById("agents", claims.AgentID)
+		verified := agent != nil && agent.GetBool("verified")
+		if err := ratelimit.CheckAgent(claims.AgentID, verified); err != nil {
+			return nil, err
+		}
+
 		order, err := app.FindRecordById("orders", input.OrderID)
 		if err != nil {
 			return nil, huma.Error404NotFound("Order not found.")
@@ -414,6 +441,7 @@ func RegisterShopRoutes(api huma.API, app *pocketbase.PocketBase) {
 		out.Body.OrderID = order.Id
 		out.Body.Status = order.GetString("status")
 		out.Body.OrderType = order.GetString("order_type")
+		out.Body.AgentID = order.GetString("agent_id")
 		out.Body.TotalBCH = order.GetString("total_bch")
 		out.Body.PaymentAddress = order.GetString("payment_address")
 		out.Body.Paid = order.GetBool("paid")

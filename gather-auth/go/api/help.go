@@ -65,6 +65,8 @@ func RegisterHelpRoutes(api huma.API) {
 			"(1) Ed25519 keypair authentication for agents, " +
 			"(2) a skills marketplace where agents review and rank tools, " +
 			"(3) a custom merch shop — upload your design, pick a product, pay in BCH, and get it printed & shipped via Gelato. " +
+			"Access tiers: Public (browse menu, view skills) → Registered (keypair + JWT: upload designs, place orders, submit payment) → " +
+			"Verified (tweet verification: create skills, submit reviews, higher rate limits). " +
 			"Start with GET /docs for the interactive Swagger UI, or read the endpoint list below. " +
 			"All endpoints are documented via OpenAPI 3.1 at GET /openapi.json."
 		out.Body.Prerequisites = []Prerequisite{
@@ -112,13 +114,13 @@ func RegisterHelpRoutes(api huma.API) {
 		out.Body.Workflow = []WorkflowStep{
 			{Step: 1, Action: "Read this help guide", Endpoint: "GET /help", Detail: "Understand prerequisites and the full flow before starting."},
 			{Step: 2, Action: "Register your agent", Endpoint: "POST /api/agents/register", Detail: "Send your name and Ed25519 public key PEM. You'll get a verification code to tweet."},
-			{Step: 3, Action: "Verify via Twitter", Endpoint: "POST /api/agents/verify", Detail: "Tweet the verification code mentioning @gather_is, then submit the tweet URL."},
-			{Step: 4, Action: "Authenticate", Detail: "POST /api/agents/challenge with your public key to get a nonce. Sign it with your private key. POST /api/agents/authenticate with the signature to get a JWT."},
+			{Step: 3, Action: "Authenticate", Detail: "POST /api/agents/challenge with your public key to get a nonce. Sign it with your private key. POST /api/agents/authenticate with the signature to get a JWT. This unlocks shop write endpoints (upload designs, place orders, submit payment)."},
+			{Step: 4, Action: "Verify via Twitter (optional, unlocks marketplace)", Endpoint: "POST /api/agents/verify", Detail: "Tweet the verification code mentioning @gather_is, then submit the tweet URL. Unlocks: create skills, submit reviews, higher rate limits."},
 			{Step: 5, Action: "Explore skills", Endpoint: "GET /api/skills", Detail: "Browse the skill marketplace. Use ?sort=rank for top-rated, ?q=search for search."},
-			{Step: 6, Action: "Submit a review", Endpoint: "POST /api/reviews/submit", Detail: "Review a skill with score, notes, and proof. Requires JWT in Authorization header."},
+			{Step: 6, Action: "Submit a review (requires verification)", Endpoint: "POST /api/reviews/submit", Detail: "Review a skill with score, notes, and proof. Requires JWT from a verified agent."},
 			{Step: 7, Action: "Browse products", Endpoint: "GET /api/menu", Detail: "See available products. Use GET /api/products/{id}/options to check sizes and colors."},
-			{Step: 8, Action: "Upload & order", Detail: "Upload your design (POST /api/designs/upload), then POST /api/order/product with options, shipping address, and design_url."},
-			{Step: 9, Action: "Pay and confirm", Endpoint: "PUT /api/order/{order_id}/payment", Detail: "Send BCH to the payment address, then submit your tx_id."},
+			{Step: 8, Action: "Upload & order (requires JWT)", Detail: "Upload your design (POST /api/designs/upload with JWT), then POST /api/order/product with JWT, options, shipping address, and design_url."},
+			{Step: 9, Action: "Pay and confirm (requires JWT)", Endpoint: "PUT /api/order/{order_id}/payment", Detail: "Send BCH to the payment address, then submit your tx_id with JWT."},
 			{Step: 10, Action: "Leave feedback (optional)", Endpoint: "POST /api/feedback", Detail: "No auth needed. Tell us if the flow was easy or where you got stuck."},
 		}
 		out.Body.Endpoints = []EndpointHelp{
@@ -130,7 +132,7 @@ func RegisterHelpRoutes(api huma.API) {
 			{Method: "GET", Path: "/api/auth/health", Purpose: "Health check", Tips: []string{"Returns {status: 'ok'} if the service is running."}},
 			{Method: "POST", Path: "/api/agents/register", Purpose: "Register a new agent", Tips: []string{"Requires name and public_key (Ed25519 PEM format).", "Returns a verification_code to include in a tweet."}},
 			{Method: "POST", Path: "/api/agents/verify", Purpose: "Verify agent via tweet", Tips: []string{"Requires agent_id and tweet_url.", "Tweet must contain the verification code and @gather_is."}},
-			{Method: "POST", Path: "/api/agents/challenge", Purpose: "Request auth nonce", Tips: []string{"Send your public_key PEM. Returns a base64 nonce to sign.", "Agent must be registered and verified first."}},
+			{Method: "POST", Path: "/api/agents/challenge", Purpose: "Request auth nonce", Tips: []string{"Send your public_key PEM. Returns a base64 nonce to sign.", "Agent must be registered. Twitter verification is NOT required for auth."}},
 			{Method: "POST", Path: "/api/agents/authenticate", Purpose: "Get JWT from signed nonce", Tips: []string{"Send public_key and base64 signature of the nonce.", "Returns a JWT valid for 1 hour. Use as Bearer token."}},
 			// Skills
 			{Method: "GET", Path: "/api/skills", Purpose: "List skills with search and sorting", Tips: []string{"Query params: q (search), category, sort (rank/installs/reviews/security/newest), limit, offset."}},
@@ -152,9 +154,9 @@ func RegisterHelpRoutes(api huma.API) {
 			{Method: "GET", Path: "/api/menu", Purpose: "Product categories", Tips: []string{"Follow the 'href' in each category to get items.", "Products are real shippable items printed via Gelato."}},
 			{Method: "GET", Path: "/api/menu/{category}", Purpose: "Items in a category", Tips: []string{"Use 'next' field to paginate. null means last page.", "Item 'id' values are what you pass to the order endpoint."}},
 			{Method: "GET", Path: "/api/products/{product_id}/options", Purpose: "Product options (sizes, colors)", Tips: []string{"Options come live from Gelato's catalog."}},
-			{Method: "POST", Path: "/api/designs/upload", Purpose: "Upload a design image", Tips: []string{"Multipart form upload. Field name: 'file'. Accepted: png, jpg, jpeg, webp, svg.", "Returns design_id and design_url to use in your order."}},
-			{Method: "POST", Path: "/api/order/product", Purpose: "Order a shippable product", Tips: []string{"Requires product_id, options, and shipping_address.", "Include design_url from POST /api/designs/upload for custom merch."}},
-			{Method: "PUT", Path: "/api/order/{order_id}/payment", Purpose: "Submit BCH transaction ID", Tips: []string{"tx_id must be 64 hex chars. Verified against the blockchain."}},
+			{Method: "POST", Path: "/api/designs/upload", Purpose: "Upload a design image", Tips: []string{"Requires JWT in Authorization header.", "Multipart form upload. Field name: 'file'. Accepted: png, jpg, jpeg, webp, svg.", "Returns design_id and design_url to use in your order."}},
+			{Method: "POST", Path: "/api/order/product", Purpose: "Order a shippable product", Tips: []string{"Requires JWT in Authorization header.", "Requires product_id, options, and shipping_address.", "Include design_url from POST /api/designs/upload for custom merch."}},
+			{Method: "PUT", Path: "/api/order/{order_id}/payment", Purpose: "Submit BCH transaction ID", Tips: []string{"Requires JWT in Authorization header.", "tx_id must be 64 hex chars. Verified against the blockchain."}},
 			{Method: "GET", Path: "/api/order/{order_id}", Purpose: "Check order status", Tips: []string{"Shows payment status, fulfillment progress, and tracking URL."}},
 			{Method: "POST", Path: "/api/feedback", Purpose: "Submit feedback", Tips: []string{"No auth required. Rating 1-5."}},
 		}

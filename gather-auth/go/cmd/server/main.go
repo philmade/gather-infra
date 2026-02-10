@@ -19,7 +19,9 @@ import (
 	"github.com/pocketbase/pocketbase/core"
 	"github.com/pocketbase/pocketbase/tools/filesystem"
 
+	auth "gather.is/auth"
 	gatherapi "gather.is/auth/api"
+	"gather.is/auth/ratelimit"
 	"gather.is/auth/tinode"
 )
 
@@ -77,8 +79,10 @@ func main() {
 			http.Redirect(w, r, "/openapi.json", http.StatusMovedPermanently)
 		})
 
+		api.UseMiddleware(ratelimit.IPRateLimitMiddleware)
+
 		gatherapi.RegisterAuthRoutes(api, app, challenges, jwtKey)
-		gatherapi.RegisterShopRoutes(api, app)
+		gatherapi.RegisterShopRoutes(api, app, jwtKey)
 		gatherapi.RegisterSkillRoutes(api, app, jwtKey)
 		gatherapi.RegisterReviewRoutes(api, app, jwtKey)
 		gatherapi.RegisterProofRoutes(api, app)
@@ -124,7 +128,7 @@ func main() {
 		}).Bind(apis.RequireAuth())
 
 		e.Router.POST("/api/designs/upload", func(re *core.RequestEvent) error {
-			return handleDesignUpload(app, re)
+			return handleDesignUpload(app, re, jwtKey)
 		})
 
 		return e.Next()
@@ -389,6 +393,7 @@ func ensureOrdersCollection(app *pocketbase.PocketBase) error {
 			Values:   []string{"awaiting_payment", "confirmed", "fulfilling", "shipped"},
 			Required: true,
 		},
+		&core.TextField{Name: "agent_id", Max: 50},
 		&core.TextField{Name: "product_id", Max: 100},
 		&core.JSONField{Name: "product_options", MaxSize: 10000},
 		&core.JSONField{Name: "shipping_address", MaxSize: 5000},
@@ -442,6 +447,7 @@ func ensureDesignsCollection(app *pocketbase.PocketBase) error {
 			MaxSelect: 1,
 			MaxSize:   20 * 1024 * 1024, // 20MB
 		},
+		&core.TextField{Name: "agent_id", Max: 50},
 		&core.TextField{Name: "original_name", Max: 500},
 		&core.TextField{Name: "mime_type", Max: 200},
 	)
@@ -554,7 +560,25 @@ var allowedDesignExts = map[string]bool{
 	".png": true, ".jpg": true, ".jpeg": true, ".webp": true, ".svg": true,
 }
 
-func handleDesignUpload(app *pocketbase.PocketBase, re *core.RequestEvent) error {
+func handleDesignUpload(app *pocketbase.PocketBase, re *core.RequestEvent, jwtKey []byte) error {
+	// Require agent JWT
+	authHeader := re.Request.Header.Get("Authorization")
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	if authHeader == "" || token == "" {
+		return apis.NewUnauthorizedError("Authentication required. Get a JWT via POST /api/agents/challenge.", nil)
+	}
+	claims, err := auth.ValidateJWT(token, jwtKey)
+	if err != nil {
+		return apis.NewUnauthorizedError("Invalid or expired token.", nil)
+	}
+
+	// Rate limit based on verified status
+	agent, _ := app.FindRecordById("agents", claims.AgentID)
+	verified := agent != nil && agent.GetBool("verified")
+	if err := ratelimit.CheckDesignUpload(claims.AgentID, verified); err != nil {
+		return apis.NewTooManyRequestsError("Design upload rate limit exceeded. Try again shortly.", nil)
+	}
+
 	// 20MB limit
 	if err := re.Request.ParseMultipartForm(20 << 20); err != nil {
 		return apis.NewBadRequestError("Failed to parse multipart form (max 20MB)", err)
@@ -578,6 +602,7 @@ func handleDesignUpload(app *pocketbase.PocketBase, re *core.RequestEvent) error
 	}
 
 	record := core.NewRecord(collection)
+	record.Set("agent_id", claims.AgentID)
 	record.Set("original_name", header.Filename)
 	record.Set("mime_type", header.Header.Get("Content-Type"))
 

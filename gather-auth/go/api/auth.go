@@ -312,9 +312,6 @@ func handleChallenge(app *pocketbase.PocketBase, cs *ChallengeStore, input *Chal
 	if agent == nil {
 		return nil, huma.Error404NotFound("Agent not registered")
 	}
-	if !agent.GetBool("verified") {
-		return nil, huma.Error400BadRequest("Agent not yet verified via Twitter")
-	}
 
 	challenge, err := auth.NewChallenge(pubKey)
 	if err != nil {
