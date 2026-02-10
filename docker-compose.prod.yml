@@ -8,23 +8,16 @@ services:
 
   tinode:
     platform: linux/amd64
-    ports:
-      - "127.0.0.1:6060:6060"
-      - "127.0.0.1:16060:16060"
     restart: unless-stopped
 
   gather-auth:
     platform: linux/amd64
-    ports:
-      - "127.0.0.1:8090:8090"
     environment:
       TINODE_WS_URL: ${TINODE_WS_URL:-wss://chat.gather.is/v0/channels}
     restart: unless-stopped
 
   gather-agents:
     platform: linux/amd64
-    ports:
-      - "127.0.0.1:8092:8092"
     restart: unless-stopped
 
   gather-ui:

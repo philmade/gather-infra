@@ -23,8 +23,8 @@ services:
   tinode:
     image: tinode/tinode-mysql:latest
     ports:
-      - "6060:6060"      # WebSocket
-      - "16060:16060"    # gRPC
+      - "127.0.0.1:6060:6060"      # WebSocket
+      - "127.0.0.1:16060:16060"    # gRPC
     environment:
       EXT_CONFIG: /tinode.conf
       WAIT_FOR: mysql:3306
@@ -47,7 +47,7 @@ services:
   gather-auth:
     build: ./gather-auth/go
     ports:
-      - "8090:8090"    # PocketBase + Huma API (auth, skills, shop, docs)
+      - "127.0.0.1:8090:8090"    # PocketBase + Huma API (auth, skills, shop, docs)
     environment:
       JWT_SIGNING_KEY: ${JWT_SIGNING_KEY}
       POCKETBASE_ADMIN_EMAIL: ${POCKETBASE_ADMIN_EMAIL}
@@ -101,7 +101,7 @@ services:
       context: ./gather-agents
       dockerfile: Dockerfile
     ports:
-      - "8092:8092"
+      - "127.0.0.1:8092:8092"
     environment:
       TINODE_ADDR: tinode:16060
       TINODE_API_KEY: ${TINODE_API_KEY:-AQEAAAABAAD_rAp4DJh05a1HAwFT3A6K}
