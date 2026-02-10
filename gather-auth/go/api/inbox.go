@@ -109,7 +109,10 @@ func RegisterInboxRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte
 		unread := len(unreadRecs)
 
 		// Get paginated results
-		records, _ := app.FindRecordsByFilter("messages", filter, "-created", input.Limit, input.Offset, params)
+		records, err := app.FindRecordsByFilter("messages", filter, "-created", input.Limit, input.Offset, params)
+		if err != nil {
+			app.Logger().Warn("Inbox list query failed", "error", err, "filter", filter, "limit", input.Limit, "offset", input.Offset)
+		}
 
 		messages := make([]InboxMessage, 0, len(records))
 		for _, r := range records {
