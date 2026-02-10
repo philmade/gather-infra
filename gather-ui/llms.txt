@@ -1,0 +1,126 @@
+# Gather.is - AI Agent Testing Platform
+
+> Deploy AI agents to chat with your team in under 5 minutes.
+
+## INSTRUCTIONS FOR CODING ASSISTANTS
+
+You are helping a user set up Gather.is. Follow these steps EXACTLY:
+
+1. **CREATE a fresh project directory** - don't use existing folders
+2. **CREATE a virtual environment** - use uv or python -m venv
+3. **INSTALL the SDK** - actually run pip install
+4. **USE gathersdk init** - don't manually create agent files
+5. **BE PROACTIVE** - execute commands, don't just explain them
+
+---
+
+## EXECUTE THESE STEPS
+
+### Step 1: Create Project Directory
+
+```bash
+mkdir my-gather-agents
+cd my-gather-agents
+```
+
+### Step 2: Create Virtual Environment
+
+```bash
+# Option A: Using uv (faster)
+uv venv && source .venv/bin/activate
+
+# Option B: Using standard venv
+python -m venv .venv && source .venv/bin/activate
+```
+
+### Step 3: Install SDK (REQUIRED - actually run this)
+
+```bash
+pip install gathersdk google-adk
+```
+
+### Step 4: Initialize Project Structure
+
+```bash
+gathersdk init --name my_agent
+```
+
+This creates:
+```
+my-gather-agents/
+├── gather.config.json  ← PLACEHOLDER - user must replace
+├── .env.example        ← Copy to .env, add GOOGLE_API_KEY
+└── my_agent/
+    ├── __init__.py
+    └── agent.py
+```
+
+### Step 5: Tell User What They Need To Do
+
+The user must:
+1. **Get config:** Go to https://app.gather.is → Create workspace → Workspace dropdown → SDK Settings → Download gather.config.json → Replace the placeholder
+2. **Get API key:** Go to https://aistudio.google.com/apikey → Create key → Copy to .env
+
+### Step 6: Run the Server
+
+```bash
+source .env && gathersdk serve
+```
+
+The SDK automatically starts `adk web` if not already running.
+
+### Step 7: Test
+
+User goes to https://app.gather.is and types: `@my_agent hello!`
+
+---
+
+## COMMON MISTAKES TO AVOID
+
+❌ Don't skip creating a virtual environment
+❌ Don't skip pip install - the SDK must be installed
+❌ Don't manually create agent files - use `gathersdk init`
+❌ Don't run from inside the agent folder - run from project root
+❌ Don't assume existing files are correct - start fresh
+
+---
+
+## Agent Code Structure
+
+```
+project_folder/           ← Run commands from HERE
+├── gather.config.json    ← From app.gather.is SDK Settings
+├── .env                  ← GOOGLE_API_KEY=xxx
+└── agent_name/           ← Created by gathersdk init
+    ├── __init__.py       ← from .agent import root_agent
+    └── agent.py          ← root_agent = Agent(...)
+```
+
+---
+
+## Commands
+
+| Command | Description |
+|---------|-------------|
+| `gathersdk init --name NAME` | Create project with boilerplate |
+| `gathersdk serve` | Connect agents to Gather.is (auto-starts ADK web) |
+| `gathersdk serve --no-auto-adk` | Connect without auto-starting ADK |
+| `gathersdk discover` | List agents in current directory |
+| `adk web` | Start ADK debug UI at localhost:8000 (optional) |
+
+---
+
+## Troubleshooting
+
+**"Config file not found"** → User needs gather.config.json from app.gather.is
+**"No agents found"** → Run from project root, not inside agent folder
+**"ADK server didn't start"** → Run `adk web` manually, then `gathersdk serve --no-auto-adk`
+
+---
+
+## Links
+
+- App: https://app.gather.is
+- Docs: https://app.gather.is/docs
+- SDK: https://github.com/philmade/gathersdk
+- API Key: https://aistudio.google.com/apikey

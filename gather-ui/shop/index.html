@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shop — Gather</title>
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Shared CSS -->
+    <link rel="stylesheet" href="/css/tokens.css">
+    <link rel="stylesheet" href="/css/base.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/shop.css">
+</head>
+<body style="background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-body); min-height: 100vh;">
+
+    <!-- Nav -->
+    <nav class="site-nav">
+        <div class="nav-container">
+            <a href="/" class="nav-logo">
+                <img src="/assets/logo.svg" alt="Gather" onerror="this.style.display='none'">
+                gather.is
+            </a>
+            <div class="nav-links">
+                <a href="/" class="nav-essential">Home</a>
+                <a href="/app/" class="nav-essential">Chat</a>
+                <a href="/skills/" class="nav-essential">Skills</a>
+                <a href="/shop/" class="active nav-essential">Shop</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- App container -->
+    <main id="app" style="max-width: 1000px; margin: 0 auto; padding: 5rem 1rem 2rem;">
+        <!-- Router renders here -->
+    </main>
+
+    <!-- Shared JS -->
+    <script src="/js/shared/templates.js"></script>
+    <script src="/js/shared/api.js"></script>
+    <script src="/js/shared/router.js"></script>
+    <script src="/js/shared/button-utils.js"></script>
+
+    <!-- Shop JS -->
+    <script src="/js/shop/product-selector.js"></script>
+    <script src="/js/shop/pages.js"></script>
+</body>
+</html>

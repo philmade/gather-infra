@@ -21,6 +21,7 @@ venv/
 
 # Go build artifacts
 **/pocketnode/pocketnode
+gather-auth/go/server
 *.exe
 *.exe~
 *.dll

@@ -4,13 +4,15 @@ package auth
 // Twitter verification via public oEmbed API — no API key needed.
 
 import (
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"math/rand"
+	"math/big"
 	"net/http"
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 )
 
 // TweetData holds the oEmbed response from Twitter.
@@ -28,7 +30,7 @@ type VerifyTweetResult struct {
 	Error         string
 }
 
-var tweetURLPattern = regexp.MustCompile(`twitter\.com/(\w+)/status/(\d+)`)
+var tweetURLPattern = regexp.MustCompile(`(?:twitter|x)\.com/(\w+)/status/(\d+)`)
 
 // FetchTweet retrieves tweet content via Twitter's public oEmbed API.
 func FetchTweet(tweetURL string) (*TweetData, error) {
@@ -47,7 +49,8 @@ func FetchTweet(tweetURL string) (*TweetData, error) {
 		url.QueryEscape(normalized),
 	)
 
-	resp, err := http.Get(oembedURL)
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(oembedURL)
 	if err != nil {
 		return nil, fmt.Errorf("fetch oembed: %w", err)
 	}
@@ -90,24 +93,35 @@ func VerifyTweet(tweetURL, verificationCode, requiredMention string) VerifyTweet
 		}
 	}
 
-	// Extract handle from author_url
-	handle := tweet.AuthorName
-	if m := tweetURLPattern.FindStringSubmatch(
-		strings.Replace(tweet.AuthorURL, "x.com", "twitter.com", 1),
-	); len(m) > 1 {
-		handle = m[1]
+	// Extract handle from author_url — must be a real twitter/x.com URL
+	m := tweetURLPattern.FindStringSubmatch(tweet.AuthorURL)
+	if len(m) < 2 {
+		// Try with normalized URL
+		m = tweetURLPattern.FindStringSubmatch(
+			strings.Replace(tweet.AuthorURL, "x.com", "twitter.com", 1),
+		)
+	}
+	if len(m) < 2 {
+		return VerifyTweetResult{
+			Valid: false,
+			Error: "could not extract twitter handle from author URL",
+		}
 	}
 
-	return VerifyTweetResult{Valid: true, TwitterHandle: handle}
+	return VerifyTweetResult{Valid: true, TwitterHandle: m[1]}
 }
 
 // GenerateVerificationCode creates a human-readable code like "gtr-X4B2".
 // Uses unambiguous characters (no I, O, 0, 1).
-func GenerateVerificationCode() string {
+func GenerateVerificationCode() (string, error) {
 	const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 	code := make([]byte, 4)
 	for i := range code {
-		code[i] = chars[rand.Intn(len(chars))]
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(chars))))
+		if err != nil {
+			return "", fmt.Errorf("generate verification code: %w", err)
+		}
+		code[i] = chars[n.Int64()]
 	}
-	return "gtr-" + string(code)
+	return "gtr-" + string(code), nil
 }

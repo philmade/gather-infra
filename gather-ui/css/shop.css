@@ -1,0 +1,139 @@
+/**
+ * Shop-specific styles
+ * Product cards, order flow, payment, design upload
+ */
+
+.shop-page {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: var(--space-xl);
+}
+
+.shop-header {
+    margin-bottom: var(--space-2xl);
+}
+
+.shop-header h1 {
+    font-size: 2rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: var(--space-sm);
+}
+
+.shop-header p {
+    color: var(--text-secondary);
+    font-size: 1.05rem;
+}
+
+/* Category cards */
+.category-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: var(--space-md);
+    margin-bottom: var(--space-2xl);
+}
+
+.category-card {
+    cursor: pointer;
+    text-align: center;
+    transition: border-color 0.2s, transform 0.2s;
+}
+
+.category-card:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+}
+
+.category-card .cat-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-xs);
+}
+
+.category-card .cat-count {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+/* Order CTA */
+.shop-ctas {
+    display: flex;
+    gap: var(--space-md);
+    margin-bottom: var(--space-2xl);
+    flex-wrap: wrap;
+}
+
+/* Design upload */
+.design-upload-area {
+    padding: var(--space-md);
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+}
+
+/* Order status */
+.order-status {
+    max-width: 600px;
+    margin: 0 auto;
+}
+
+.status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+
+.status-awaiting {
+    background: var(--yellow-soft);
+    color: var(--yellow);
+}
+
+.status-confirmed {
+    background: var(--blue-soft);
+    color: var(--blue);
+}
+
+.status-shipped {
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+
+.status-complete {
+    background: var(--green-soft);
+    color: var(--green);
+}
+
+/* Payment address display */
+.payment-address {
+    padding: var(--space-md);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    word-break: break-all;
+    color: var(--text-primary);
+}
+
+/* Shipping form */
+.shipping-form {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: var(--space-md);
+}
+
+.shipping-form .full-width {
+    grid-column: 1 / -1;
+}
+
+@media (max-width: 640px) {
+    .shop-page { padding: var(--space-md); }
+    .category-grid { grid-template-columns: 1fr 1fr; }
+    .shop-ctas { flex-direction: column; }
+    .shipping-form { grid-template-columns: 1fr; }
+}

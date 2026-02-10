@@ -13,29 +13,21 @@ services:
       - "127.0.0.1:16060:16060"
     restart: unless-stopped
 
-  gather-chat:
+  gather-auth:
+    platform: linux/amd64
     ports:
-      - "127.0.0.1:8091:8090"
+      - "127.0.0.1:8090:8090"
     environment:
       TINODE_WS_URL: ${TINODE_WS_URL:-wss://chat.gather.is/v0/channels}
     restart: unless-stopped
 
   gather-agents:
+    platform: linux/amd64
     ports:
-      - "127.0.0.1:8092:8090"
+      - "127.0.0.1:8092:8092"
     restart: unless-stopped
 
-  gather-skills:
-    ports:
-      - "127.0.0.1:3001:3000"
-    environment:
-      NODE_ENV: production
-      API_URL: https://skills.gather.is
-    restart: unless-stopped
-
-  gather-shop:
-    ports:
-      - "127.0.0.1:8093:8000"
+  gather-ui:
     restart: unless-stopped
 
   nginx:
@@ -46,10 +38,10 @@ services:
     volumes:
       - ./nginx/gather.conf:/etc/nginx/conf.d/default.conf:ro
       - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./gather-ui:/var/www/gather-ui:ro
     depends_on:
-      - gather-chat
-      - gather-skills
-      - gather-shop
+      - gather-auth
+      - gather-ui
     networks:
       - gather_net
     restart: unless-stopped

@@ -1,0 +1,76 @@
+/**
+ * Design Tokens — Shared CSS custom properties
+ * Used by all pages: landing, chat, skills, shop
+ */
+
+:root {
+    /* Background colors */
+    --bg-primary: #0f0f14;
+    --bg-secondary: #16161d;
+    --bg-tertiary: #1c1c26;
+    --bg-code: #1a1a24;
+
+    /* Text colors */
+    --text-primary: #f4f4f6;
+    --text-secondary: #9ca3af;
+    --text-muted: #6b7280;
+
+    /* Brand / accent */
+    --accent: #a855f7;
+    --accent-hover: #9333ea;
+    --accent-soft: rgba(168, 85, 247, 0.15);
+    --accent-glow: rgba(168, 85, 247, 0.4);
+
+    /* Status colors */
+    --green: #22c55e;
+    --green-soft: rgba(34, 197, 94, 0.15);
+    --yellow: #eab308;
+    --yellow-soft: rgba(234, 179, 8, 0.15);
+    --red: #ef4444;
+    --red-soft: rgba(239, 68, 68, 0.15);
+    --blue: #3b82f6;
+    --blue-soft: rgba(59, 130, 246, 0.15);
+    --pink: #ec4899;
+
+    /* Score colors (>=7 green, 5-6.9 yellow, <5 red) */
+    --score-high: var(--green);
+    --score-high-bg: var(--green-soft);
+    --score-mid: var(--yellow);
+    --score-mid-bg: var(--yellow-soft);
+    --score-low: var(--red);
+    --score-low-bg: var(--red-soft);
+
+    /* Borders & surfaces */
+    --border: #2a2a36;
+    --border-light: #374151;
+
+    /* Radius */
+    --radius: 12px;
+    --radius-sm: 8px;
+    --radius-xs: 4px;
+
+    /* Spacing scale */
+    --space-xs: 0.25rem;
+    --space-sm: 0.5rem;
+    --space-md: 1rem;
+    --space-lg: 1.5rem;
+    --space-xl: 2rem;
+    --space-2xl: 3rem;
+    --space-3xl: 4rem;
+
+    /* Fonts */
+    --font-heading: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-body: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+    /* Slack sidebar colors (used by chat) */
+    --slack-sidebar: #3F0E40;
+    --slack-sidebar-hover: #350D36;
+    --slack-sidebar-active: #1164A3;
+    --slack-sidebar-text: #CFB4D0;
+    --slack-sidebar-text-bright: #FFFFFF;
+    --slack-accent: #1264A3;
+    --slack-online: #2BAC76;
+    --slack-away: #E0AC00;
+    --slack-offline: #616061;
+}

@@ -44,27 +44,20 @@ services:
       retries: 5
       start_period: 30s
 
-  pocketbase:
-    # PocketBase runs inside gather-chat's PocketNode for now.
-    # Shared by all services via network. Phase 1 may extract to standalone.
-    # See gather-chat service below — it hosts PocketBase on :8090.
-    # This is a placeholder reminder, not a real service.
-    profiles: ["standalone-pb"]  # Only starts if explicitly requested
-    image: alpine
-    command: echo "PocketBase runs inside gather-chat PocketNode"
-
-  # === Services ===
-
-  gather-chat:
-    build: ./gather-chat/pocketnode
+  gather-auth:
+    build: ./gather-auth/go
     ports:
-      - "8091:8090"    # PocketBase API + Admin UI
+      - "8090:8090"    # PocketBase + Huma API (auth, skills, shop, docs)
     environment:
+      JWT_SIGNING_KEY: ${JWT_SIGNING_KEY}
+      POCKETBASE_ADMIN_EMAIL: ${POCKETBASE_ADMIN_EMAIL}
+      POCKETBASE_ADMIN_PASSWORD: ${POCKETBASE_ADMIN_PASSWORD}
       TINODE_ADDR: tinode:16060
       TINODE_API_KEY: ${TINODE_API_KEY:-AQEAAAABAAD_rAp4DJh05a1HAwFT3A6K}
       TINODE_PASSWORD_SECRET: ${TINODE_PASSWORD_SECRET:-agency_tinode_sync_v1}
-      POCKETBASE_ADMIN_EMAIL: ${POCKETBASE_ADMIN_EMAIL}
-      POCKETBASE_ADMIN_PASSWORD: ${POCKETBASE_ADMIN_PASSWORD}
+      TINODE_WS_URL: ${TINODE_WS_URL:-ws://localhost:6060/v0/channels}
+      BCH_ADDRESS: ${BCH_ADDRESS}
+      GELATO_API_KEY: ${GELATO_API_KEY}
     volumes:
       - pocketbase_data:/pb_data
     depends_on:
@@ -72,51 +65,56 @@ services:
         condition: service_healthy
     networks:
       - gather_net
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8090/api/auth/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # === Frontend ===
+
+  gather-ui:
+    image: nginx:alpine
+    ports:
+      - "3000:80"
+    volumes:
+      - ./gather-ui:/usr/share/nginx/html:ro
+      - ./gather-ui/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      gather-auth:
+        condition: service_healthy
+    networks:
+      - gather_net
+
+  # === Services ===
+  # gather-chat: No longer a separate service. Tinode IS the chat server.
+  # PocketNode logic (user sync, SDK registration) now lives in gather-auth.
+  # The gather-chat/ directory contains the Python SDK and docs only.
+  #
+  # gather-skills: Ported to Go. Now runs inside gather-auth (Phase 2).
+  # gather-shop: Ported to Go. Now runs inside gather-auth (Phase 2).
 
   gather-agents:
     # Phase 3: New PocketNode instance for agent social network
-    # For now, this is a placeholder that will be built in Phase 3.
     build:
       context: ./gather-agents
       dockerfile: Dockerfile
     ports:
-      - "8092:8090"
+      - "8092:8092"
     environment:
       TINODE_ADDR: tinode:16060
       TINODE_API_KEY: ${TINODE_API_KEY:-AQEAAAABAAD_rAp4DJh05a1HAwFT3A6K}
+      POCKETBASE_URL: http://gather-auth:8090
       JWT_SIGNING_KEY: ${JWT_SIGNING_KEY}
-    volumes:
-      - pocketbase_data:/pb_data
     depends_on:
       tinode:
+        condition: service_healthy
+      gather-auth:
         condition: service_healthy
     networks:
       - gather_net
     profiles: ["agents"]  # Not started by default until Phase 3
-
-  gather-skills:
-    build: ./gather-skills
-    ports:
-      - "3001:3000"
-    environment:
-      NODE_ENV: development
-      PORT: 3000
-      DATABASE_PATH: /app/data/reskill.db
-      API_URL: http://localhost:3001
-    volumes:
-      - skills_data:/app/data
-    networks:
-      - gather_net
-
-  gather-shop:
-    build: ./gather-shop
-    ports:
-      - "8093:8000"
-    environment:
-      BCH_ADDRESS: ${BCH_ADDRESS}
-      GELATO_API_KEY: ${GELATO_API_KEY}
-    networks:
-      - gather_net
 
   # nginx not included in dev compose — services accessed directly by port.
   # Production compose adds nginx for TLS + subdomain routing.
@@ -129,4 +127,3 @@ volumes:
   mysql_data:
   tinode_uploads:
   pocketbase_data:
-  skills_data:

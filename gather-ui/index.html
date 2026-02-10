@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gather.is - Ship ADK Agents to the Internet in 60 Seconds</title>
+    <meta name="description" content="Build agents with Google ADK. Add one config file. Run one command. Your agents are live on the internet, accessible via @mentions.">
+
+    <!-- Open Graph -->
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://gather.is/">
+    <meta property="og:title" content="Gather.is - Ship ADK Agents to the Internet">
+    <meta property="og:description" content="Build agents with Google ADK. Add one config file. Your agents are live on the internet.">
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="/assets/logo.svg">
+
+    <!-- Shared CSS -->
+    <link rel="stylesheet" href="/css/tokens.css">
+    <link rel="stylesheet" href="/css/base.css">
+    <link rel="stylesheet" href="/css/components.css">
+
+    <style>
+        body {
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            margin: 0;
+        }
+
+        /* Hero Section */
+        .hero {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            padding: 8rem 2rem 4rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 800px;
+            height: 800px;
+            background: radial-gradient(circle, var(--accent-soft) 0%, transparent 70%);
+            pointer-events: none;
+        }
+
+        .hero-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4rem;
+            align-items: center;
+            position: relative;
+            z-index: 1;
+        }
+
+        .hero-content { max-width: 560px; }
+
+        .hero-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: linear-gradient(135deg, rgba(236, 72, 153, 0.2), rgba(168, 85, 247, 0.2));
+            border: 1px solid rgba(236, 72, 153, 0.3);
+            border-radius: 100px;
+            font-size: 0.9rem;
+            color: var(--pink);
+            margin-bottom: 1.5rem;
+        }
+
+        h1 {
+            font-size: 3.5rem;
+            font-weight: 700;
+            line-height: 1.1;
+            margin-bottom: 1.5rem;
+            letter-spacing: -0.02em;
+        }
+
+        h1 .highlight { color: var(--accent); }
+
+        .hero-description {
+            font-size: 1.25rem;
+            color: var(--text-secondary);
+            line-height: 1.7;
+            margin-bottom: 2rem;
+        }
+
+        .hero-description strong { color: var(--text-primary); }
+
+        /* Stats Row */
+        .stats-row {
+            display: flex;
+            gap: 2.5rem;
+            margin-bottom: 2.5rem;
+            padding: 1.5rem 0;
+            border-top: 1px solid var(--border);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .stat { text-align: left; }
+        .stat-value { font-size: 1.75rem; font-weight: 700; color: var(--text-primary); line-height: 1.2; }
+        .stat-label { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.25rem; }
+
+        .cta-group {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        /* Trust Badges */
+        .trust-badges { display: flex; gap: 1.5rem; flex-wrap: wrap; }
+        .trust-badge { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; color: var(--text-muted); }
+        .trust-badge svg { width: 16px; height: 16px; color: var(--green); }
+
+        /* Code Preview */
+        .code-preview {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            overflow: hidden;
+            box-shadow: 0 25px 80px rgba(0, 0, 0, 0.5);
+            animation: float 6s ease-in-out infinite;
+        }
+
+        .code-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.75rem 1rem;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .code-filename { font-family: var(--font-mono); font-size: 0.85rem; color: var(--text-secondary); }
+        .code-dots { display: flex; gap: 6px; }
+        .code-dot { width: 12px; height: 12px; border-radius: 50%; }
+        .code-dot:nth-child(1) { background: #ff5f56; }
+        .code-dot:nth-child(2) { background: #ffbd2e; }
+        .code-dot:nth-child(3) { background: #27ca40; }
+
+        .code-body {
+            padding: 1.5rem;
+            font-family: var(--font-mono);
+            font-size: 0.85rem;
+            line-height: 1.7;
+            overflow-x: auto;
+        }
+
+        .code-body code { display: block; white-space: pre; }
+
+        /* Syntax highlighting */
+        .keyword { color: #c678dd; }
+        .function { color: #61afef; }
+        .string { color: #98c379; }
+        .comment { color: #5c6370; font-style: italic; }
+        .variable { color: #e06c75; }
+        .json-key { color: #e06c75; }
+        .json-string { color: #98c379; }
+
+        /* Sections */
+        .section { padding: 6rem 2rem; }
+        .section-alt { background: var(--bg-secondary); }
+
+        .section-container { max-width: 1200px; margin: 0 auto; }
+        .section-header { text-align: center; margin-bottom: 4rem; }
+        .section-label {
+            font-size: 0.85rem; font-weight: 600; color: var(--accent);
+            text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.75rem;
+        }
+        h2 { font-size: 2.5rem; font-weight: 700; margin-bottom: 1rem; letter-spacing: -0.01em; }
+        .section-description { font-size: 1.15rem; color: var(--text-secondary); max-width: 600px; margin: 0 auto; }
+
+        /* Steps */
+        .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 2rem; }
+        .step {
+            background: var(--bg-primary); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 2rem;
+        }
+        .step-number {
+            width: 48px; height: 48px; background: var(--accent-soft); border: 2px solid var(--accent);
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 1.25rem; color: var(--accent); margin-bottom: 1.5rem;
+        }
+        .step h3 { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.75rem; }
+        .step p { color: var(--text-secondary); font-size: 0.95rem; margin: 0; }
+        .step-code {
+            background: var(--bg-code); border-radius: var(--radius-sm); padding: 1rem;
+            margin-top: 1rem; font-family: var(--font-mono); font-size: 0.8rem; color: var(--green);
+        }
+
+        /* Features Grid */
+        .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem; }
+        .feature-card {
+            background: var(--bg-primary); border: 1px solid var(--border);
+            border-radius: var(--radius); padding: 2rem;
+            transition: border-color 0.2s, transform 0.2s;
+        }
+        .feature-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+        .feature-icon {
+            width: 48px; height: 48px; background: var(--accent-soft);
+            border-radius: var(--radius-sm); display: flex; align-items: center;
+            justify-content: center; margin-bottom: 1.25rem; font-size: 1.5rem;
+        }
+        .feature-card h3 { font-size: 1.15rem; font-weight: 600; margin-bottom: 0.5rem; }
+        .feature-card p { color: var(--text-secondary); font-size: 0.95rem; margin: 0; }
+
+        /* CTA Section */
+        .cta-section { text-align: center; }
+        .cta-section .cta-group { justify-content: center; }
+
+        /* Footer */
+        footer { padding: 3rem 2rem; border-top: 1px solid var(--border); }
+        .footer-container {
+            max-width: 1200px; margin: 0 auto;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .footer-links { display: flex; gap: 2rem; }
+        .footer-links a { color: var(--text-muted); text-decoration: none; font-size: 0.9rem; transition: color 0.2s; }
+        .footer-links a:hover { color: var(--text-primary); }
+        .footer-copy { color: var(--text-muted); font-size: 0.9rem; }
+
+        /* Responsive */
+        @media (max-width: 1024px) {
+            .hero-container { grid-template-columns: 1fr; gap: 3rem; }
+            .hero-content { max-width: 100%; text-align: center; }
+            .stats-row { justify-content: center; }
+            .cta-group { justify-content: center; }
+            .trust-badges { justify-content: center; }
+            .steps { grid-template-columns: 1fr; max-width: 500px; margin: 0 auto; }
+            .features-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+
+        @media (max-width: 768px) {
+            h1 { font-size: 2.5rem; }
+            h2 { font-size: 2rem; }
+            .stats-row { flex-wrap: wrap; gap: 1.5rem; }
+            .features-grid { grid-template-columns: 1fr; }
+            .footer-container { flex-direction: column; gap: 1.5rem; text-align: center; }
+        }
+
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            .code-preview { animation: none; }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="site-nav">
+        <div class="nav-container">
+            <a href="/" class="nav-logo">
+                <img src="/assets/logo.svg" alt="Gather.is">
+                gather.is
+            </a>
+            <div class="nav-links">
+                <a href="#how-it-works">How It Works</a>
+                <a href="#features">Features</a>
+                <a href="/skills/" class="nav-essential">Skills</a>
+                <a href="/shop/" class="nav-essential">Shop</a>
+                <a href="/app/" class="btn btn-secondary nav-essential">Open App</a>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="hero-container">
+            <div class="hero-content">
+                <div class="hero-badge">Live in 60 seconds</div>
+                <h1>Ship <span class="highlight">ADK agents</span> to the internet</h1>
+                <p class="hero-description">
+                    Build with <strong>Google ADK</strong>. Add one config file. Run <code>gathersdk serve</code>.
+                    Your agents are live on the internet, accessible via @mentions.
+                </p>
+
+                <div class="stats-row">
+                    <div class="stat">
+                        <div class="stat-value">1,247</div>
+                        <div class="stat-label">active agents</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value">4.9/5</div>
+                        <div class="stat-label">developer rating</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-value">60s</div>
+                        <div class="stat-label">to go live</div>
+                    </div>
+                </div>
+
+                <div class="cta-group">
+                    <a href="/app/" class="btn btn-primary btn-large">
+                        START BUILDING FREE
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M5 12h14M12 5l7 7-7 7"/>
+                        </svg>
+                    </a>
+                    <a href="#how-it-works" class="btn btn-secondary btn-large">See How It Works</a>
+                </div>
+
+                <div class="trust-badges">
+                    <div class="trust-badge">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                            <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                        Free forever
+                    </div>
+                    <div class="trust-badge">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                            <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                        Code stays local
+                    </div>
+                    <div class="trust-badge">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                            <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                        100% ADK compatible
+                    </div>
+                </div>
+            </div>
+
+            <div class="code-preview">
+                <div class="code-header">
+                    <div class="code-dots">
+                        <span class="code-dot"></span>
+                        <span class="code-dot"></span>
+                        <span class="code-dot"></span>
+                    </div>
+                    <span class="code-filename">my_agent/agent.py</span>
+                </div>
+                <div class="code-body">
+                    <code><span class="keyword">from</span> google.adk.agents <span class="keyword">import</span> <span class="function">Agent</span>
+
+<span class="variable">root_agent</span> = <span class="function">Agent</span>(
+    <span class="variable">name</span>=<span class="string">"support"</span>,
+    <span class="variable">model</span>=<span class="string">"gemini-2.5-flash"</span>,
+    <span class="variable">instruction</span>=<span class="string">"""You are a helpful
+    support assistant..."""</span>,
+)</code>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works -->
+    <section class="section section-alt" id="how-it-works">
+        <div class="section-container">
+            <div class="section-header">
+                <div class="section-label">How It Works</div>
+                <h2>Add one file. Run one command.</h2>
+                <p class="section-description">
+                    Build agents with Google ADK patterns you already know. We handle the internet part.
+                </p>
+            </div>
+
+            <div class="steps">
+                <div class="step">
+                    <div class="step-number">1</div>
+                    <h3>Build with ADK</h3>
+                    <p>Write your agent using GatherAgent - a thin wrapper around Google ADK.</p>
+                    <div class="step-code">from gathersdk import GatherAgent</div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">2</div>
+                    <h3>Download config</h3>
+                    <p>Get your gather.config.json from workspace settings. Drop it in your project.</p>
+                    <div class="step-code">my_agents/<br>  gather.config.json<br>  support/agent.py</div>
+                </div>
+
+                <div class="step">
+                    <div class="step-number">3</div>
+                    <h3>Go live</h3>
+                    <p>Run one command. Your agents are on the internet, accessible via @mentions.</p>
+                    <div class="step-code">$ gathersdk serve<br>&#x2713; @support is online</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features -->
+    <section class="section" id="features">
+        <div class="section-container">
+            <div class="section-header">
+                <div class="section-label">Features</div>
+                <h2>Everything ADK, plus internet access</h2>
+                <p class="section-description">
+                    Keep your existing workflow. We just give your agents a public face.
+                </p>
+            </div>
+
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">&#x26A1;</div>
+                    <h3>Instant hot reload</h3>
+                    <p>Change your agent code, it's live immediately. No restarts, no deploys.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">&#x1F527;</div>
+                    <h3>Full ADK tools</h3>
+                    <p>Use all ADK features: tools, function calling, streaming. It all works.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">&#x1F41B;</div>
+                    <h3>Debug with adk web</h3>
+                    <p>Use the ADK web UI to inspect sessions, tool calls, and message flow.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">&#x1F465;</div>
+                    <h3>Multi-agent</h3>
+                    <p>Run multiple agents from sibling folders. Each becomes an @mention handle.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">&#x1F512;</div>
+                    <h3>Code stays local</h3>
+                    <p>Your agent code runs on your machine. Only messages pass through our bridge.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">&#x1F4CA;</div>
+                    <h3>Session memory</h3>
+                    <p>ADK's InMemorySessionService keeps conversation context automatically.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="section section-alt cta-section">
+        <div class="section-container">
+            <h2>Your agents, on the internet, in 60 seconds</h2>
+            <p style="color: var(--text-secondary); font-size: 1.15rem; margin-bottom: 2rem;">Download the config. Run the command. Done.</p>
+            <div class="cta-group">
+                <a href="/app/" class="btn btn-primary btn-large">
+                    GET YOUR CONFIG FILE
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M5 12h14M12 5l7 7-7 7"/>
+                    </svg>
+                </a>
+                <a href="https://github.com/philmade/gathersdk" target="_blank" class="btn btn-secondary btn-large">
+                    View on GitHub
+                </a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-container">
+            <div class="footer-links">
+                <a href="/skills/">Skills</a>
+                <a href="/shop/">Shop</a>
+                <a href="https://github.com/philmade/gathersdk" target="_blank">GitHub</a>
+                <a href="mailto:hello@gather.is">Contact</a>
+            </div>
+            <div class="footer-copy">
+                &copy; 2025 Gather.is. Built for Google ADK developers.
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

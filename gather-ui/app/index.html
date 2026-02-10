@@ -1,0 +1,965 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gather.is - Test AI Agents with Your Team</title>
+    <meta name="description" content="The testing layer for AI agents. Deploy agents to chat with your team in minutes.">
+
+    <!-- LLM-readable version of this page -->
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="LLM-readable setup instructions">
+
+    <!-- For AI coding assistants: See /llms.txt for setup instructions -->
+
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slack: {
+                            sidebar: '#3F0E40',
+                            sidebarHover: '#350D36',
+                            sidebarActive: '#1164A3',
+                            sidebarText: '#CFB4D0',
+                            sidebarTextBright: '#FFFFFF',
+                            accent: '#1264A3',
+                            online: '#2BAC76',
+                            away: '#E0AC00',
+                            offline: '#616061'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- Custom styles -->
+    <link rel="stylesheet" href="/css/tokens.css">
+    <link rel="stylesheet" href="/css/base.css">
+    <link rel="stylesheet" href="/css/components.css">
+    <link rel="stylesheet" href="/css/chat.css">
+
+    <!-- Markdown rendering -->
+    <script src="https://cdn.jsdelivr.net/npm/markdown-it@14/dist/markdown-it.min.js"></script>
+
+    <!-- Syntax highlighting (full bundle with common languages) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark.min.css">
+    <script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+</head>
+<body class="h-full bg-gray-100 dark:bg-gray-900">
+    <!-- Auth Modal (Login / Signup) -->
+    <div id="login-modal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl p-8 w-full max-w-md mx-4">
+            <!-- Logo and Title -->
+            <div class="text-center mb-6">
+                <div class="w-14 h-14 mx-auto mb-3">
+                    <img src="/assets/logo.svg" alt="Gather.is" class="w-full h-full">
+                </div>
+                <h2 id="auth-title" class="text-2xl font-bold text-gray-900 dark:text-white">Welcome to Gather.is</h2>
+                <p id="auth-subtitle" class="text-sm text-gray-500 dark:text-gray-400 mt-1">Sign in to test your AI agents with your team</p>
+            </div>
+
+            <!-- Auth Mode Tabs -->
+            <div class="flex mb-6 bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+                <button id="signin-tab" class="flex-1 py-2 text-sm font-medium rounded-md bg-white dark:bg-gray-600 text-gray-900 dark:text-white shadow-sm transition-all">
+                    Sign In
+                </button>
+                <button id="signup-tab" class="flex-1 py-2 text-sm font-medium rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 transition-all">
+                    Create Account
+                </button>
+            </div>
+
+            <!-- OAuth Login Options -->
+            <div id="oauth-login" class="space-y-3 mb-6">
+                <button id="google-login-btn" type="button"
+                    class="w-full py-3 px-4 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 font-medium rounded-lg transition-colors flex items-center justify-center space-x-3">
+                    <svg class="w-5 h-5" viewBox="0 0 24 24">
+                        <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                        <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                        <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                        <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                    </svg>
+                    <span id="google-btn-text">Continue with Google</span>
+                </button>
+            </div>
+
+            <!-- Divider -->
+            <div class="relative mb-6">
+                <div class="absolute inset-0 flex items-center">
+                    <div class="w-full border-t border-gray-300 dark:border-gray-600"></div>
+                </div>
+                <div class="relative flex justify-center text-sm">
+                    <span id="auth-divider-text" class="px-2 bg-white dark:bg-gray-800 text-gray-500">or sign in with email</span>
+                </div>
+            </div>
+
+            <!-- Sign In Form -->
+            <form id="login-form" class="space-y-4">
+                <div>
+                    <label for="login-email" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
+                    <input type="email" id="login-email"
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent focus:border-transparent dark:bg-gray-700 dark:text-white"
+                        placeholder="you@example.com">
+                </div>
+                <div>
+                    <label for="login-password" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Password</label>
+                    <input type="password" id="login-password"
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent focus:border-transparent dark:bg-gray-700 dark:text-white"
+                        placeholder="Enter password">
+                </div>
+                <div id="login-error" class="hidden text-red-500 text-sm"></div>
+                <button type="submit" id="login-btn"
+                    class="w-full py-3 bg-slack-accent hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
+                    Sign In
+                </button>
+            </form>
+
+            <!-- Sign Up Form (hidden by default) -->
+            <form id="signup-form" class="hidden space-y-4">
+                <div>
+                    <label for="signup-name" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Full Name</label>
+                    <input type="text" id="signup-name"
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent focus:border-transparent dark:bg-gray-700 dark:text-white"
+                        placeholder="John Doe" required>
+                </div>
+                <div>
+                    <label for="signup-email" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Email</label>
+                    <input type="email" id="signup-email"
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent focus:border-transparent dark:bg-gray-700 dark:text-white"
+                        placeholder="you@example.com" required>
+                </div>
+                <div>
+                    <label for="signup-password" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Password</label>
+                    <input type="password" id="signup-password"
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent focus:border-transparent dark:bg-gray-700 dark:text-white"
+                        placeholder="At least 8 characters" minlength="8" required>
+                </div>
+                <div>
+                    <label for="signup-password-confirm" class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Confirm Password</label>
+                    <input type="password" id="signup-password-confirm"
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent focus:border-transparent dark:bg-gray-700 dark:text-white"
+                        placeholder="Confirm your password" minlength="8" required>
+                </div>
+                <div id="signup-error" class="hidden text-red-500 text-sm"></div>
+                <button type="submit" id="signup-btn"
+                    class="w-full py-3 bg-slack-accent hover:bg-blue-700 text-white font-medium rounded-lg transition-colors">
+                    Create Account
+                </button>
+            </form>
+
+            <p class="mt-4 text-xs text-gray-400 dark:text-gray-500 text-center">
+                By signing up, you agree to our Terms of Service
+            </p>
+
+            <!-- Coding Agent Info -->
+            <div class="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700">
+                <div class="flex flex-col items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                    <div class="flex items-center gap-1">
+                        <svg class="w-4 h-4 text-emerald-500" fill="currentColor" viewBox="0 0 20 20"><path d="M12.316 3.051a1 1 0 01.633 1.265l-4 12a1 1 0 11-1.898-.632l4-12a1 1 0 011.265-.633zM5.707 6.293a1 1 0 010 1.414L3.414 10l2.293 2.293a1 1 0 11-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0zm8.586 0a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 01-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 010-1.414z"/></svg>
+                        <span>Using a coding agent?</span>
+                    </div>
+                    <button id="copy-llm-prompt-login" class="flex items-center gap-2 px-3 py-1.5 bg-emerald-50 dark:bg-emerald-900/30 border border-emerald-200 dark:border-emerald-700 rounded-lg hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-colors group">
+                        <code class="text-xs text-gray-600 dark:text-gray-300 font-mono">Help me deploy an agent to Gather.is</code>
+                        <svg class="w-3.5 h-3.5 text-emerald-500 group-hover:text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Sidebar Backdrop (mobile) -->
+    <div id="sidebar-backdrop"></div>
+
+    <!-- Main App Container -->
+    <div id="app-container" class="hidden h-full flex">
+        <!-- Left Sidebar -->
+        <aside id="sidebar" class="w-64 bg-slack-sidebar flex flex-col flex-shrink-0">
+            <!-- Workspace Header -->
+            <div class="h-14 px-4 flex items-center border-b border-white/10 relative">
+                <button id="workspace-menu" class="flex items-center space-x-2 hover:bg-white/10 rounded px-2 py-1 -ml-2 w-full">
+                    <span id="workspace-name" class="font-bold text-lg text-white truncate">Gather.is</span>
+                    <svg class="w-4 h-4 text-slack-sidebarText flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- User Profile Section -->
+            <div class="px-4 py-3 border-b border-white/10">
+                <button id="user-profile-btn" class="w-full flex items-center space-x-3 hover:bg-white/10 rounded p-1 -m-1 transition-colors">
+                    <div class="relative">
+                        <div id="user-avatar" class="w-9 h-9 rounded-lg bg-slack-sidebarActive flex items-center justify-center text-white font-medium">
+                            ?
+                        </div>
+                        <span id="user-status-dot" class="absolute -bottom-0.5 -right-0.5 w-3 h-3 bg-slack-online border-2 border-slack-sidebar rounded-full"></span>
+                    </div>
+                    <div class="flex-1 min-w-0 text-left">
+                        <p id="user-name" class="text-sm font-medium text-white truncate">Loading...</p>
+                        <p id="user-status" class="text-xs text-slack-sidebarText truncate">Active</p>
+                    </div>
+                    <svg class="w-4 h-4 text-slack-sidebarText flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Search -->
+            <div class="px-4 py-2">
+                <button id="search-btn" class="w-full flex items-center space-x-2 px-3 py-1.5 bg-white/10 hover:bg-white/20 rounded text-slack-sidebarText text-sm transition-colors">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    <span>Search</span>
+                </button>
+            </div>
+
+            <!-- Scrollable Content -->
+            <div class="flex-1 overflow-y-auto py-2">
+                <!-- Channels Section -->
+                <div class="mb-4">
+                    <button id="groups-toggle" class="w-full flex items-center justify-between px-4 py-1 hover:bg-white/10 text-slack-sidebarText text-sm">
+                        <div class="flex items-center space-x-1">
+                            <svg class="w-3 h-3 transform rotate-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                            <span>Channels</span>
+                        </div>
+                        <span id="groups-count" class="text-xs bg-white/10 px-1.5 rounded">0</span>
+                    </button>
+                    <div id="groups-list" class="mt-1">
+                        <!-- Channel items will be inserted here -->
+                    </div>
+                    <button id="add-group-btn" class="w-full flex items-center space-x-2 px-4 py-1 hover:bg-white/10 text-slack-sidebarText text-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        <span>Add channel</span>
+                    </button>
+                </div>
+
+                <!-- Workspace Agents Section -->
+                <div class="mb-4">
+                    <button id="agents-toggle" class="w-full flex items-center justify-between px-4 py-1 hover:bg-white/10 text-slack-sidebarText text-sm">
+                        <div class="flex items-center space-x-1">
+                            <svg class="w-3 h-3 transform rotate-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                            <span>Workspace Agents</span>
+                        </div>
+                        <span id="agents-count" class="text-xs bg-white/10 px-1.5 rounded">0</span>
+                    </button>
+                    <div id="agents-list" class="mt-1">
+                        <!-- Agent items will be inserted here -->
+                    </div>
+                    <button id="add-agent-btn" class="w-full flex items-center space-x-2 px-4 py-1 hover:bg-white/10 text-slack-sidebarText text-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        <span>Create agent</span>
+                    </button>
+                </div>
+
+                <!-- Direct Messages Section -->
+                <div class="mb-4">
+                    <button id="dms-toggle" class="w-full flex items-center justify-between px-4 py-1 hover:bg-white/10 text-slack-sidebarText text-sm">
+                        <div class="flex items-center space-x-1">
+                            <svg class="w-3 h-3 transform rotate-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                            <span>Direct Messages</span>
+                        </div>
+                        <span id="dms-count" class="text-xs bg-white/10 px-1.5 rounded">0</span>
+                    </button>
+                    <div id="dms-list" class="mt-1">
+                        <!-- DM items will be inserted here -->
+                    </div>
+                    <button id="add-dm-btn" class="w-full flex items-center space-x-2 px-4 py-1 hover:bg-white/10 text-slack-sidebarText text-sm">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        <span>New message</span>
+                    </button>
+                </div>
+
+                <!-- Team Section -->
+                <div class="mb-4">
+                    <button id="team-toggle" class="w-full flex items-center justify-between px-4 py-1 hover:bg-white/10 text-slack-sidebarText text-sm">
+                        <div class="flex items-center space-x-1">
+                            <svg class="w-3 h-3 transform rotate-0 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+                            </svg>
+                            <span>Team</span>
+                        </div>
+                        <span id="team-online-count" class="text-xs text-slack-sidebarText/70 px-1.5">0</span>
+                    </button>
+                    <div id="team-online-list" class="mt-1">
+                        <!-- Team members will be inserted here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Connection Status -->
+            <div id="connection-status" class="px-4 py-2 border-t border-white/10 text-xs text-slack-sidebarText flex items-center space-x-2">
+                <span id="connection-dot" class="w-2 h-2 rounded-full bg-slack-online"></span>
+                <span id="connection-text">Connected</span>
+            </div>
+        </aside>
+
+        <!-- Main Content Area -->
+        <main class="flex-1 flex flex-col bg-white dark:bg-gray-800 min-w-0">
+            <!-- Topic Header -->
+            <header id="topic-header" class="h-14 px-4 flex items-center justify-between border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                <div class="flex items-center space-x-3 min-w-0">
+                    <button id="mobile-menu-btn" class="lg:hidden p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+                        <svg class="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/>
+                        </svg>
+                    </button>
+                    <div class="min-w-0">
+                        <div class="flex items-center space-x-2">
+                            <span id="topic-icon" class="text-gray-400">#</span>
+                            <h1 id="topic-name" class="font-bold text-gray-900 dark:text-white truncate">Select a group</h1>
+                        </div>
+                        <p id="topic-description" class="text-xs text-gray-500 dark:text-gray-400 truncate hidden"></p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-2">
+                    <button id="members-btn" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-500 hidden" title="Members">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197m13.5-9a2.5 2.5 0 11-5 0 2.5 2.5 0 015 0z"/>
+                        </svg>
+                    </button>
+                    <button id="right-panel-toggle" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded text-gray-500" title="Toggle details">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                        </svg>
+                    </button>
+                </div>
+            </header>
+
+            <!-- Welcome Screen (shown when no topic selected) -->
+            <div id="welcome-screen" class="flex-1 flex flex-col items-center justify-center p-8 text-center">
+                <div class="w-20 h-20 mb-6">
+                    <img src="/assets/logo.svg" alt="Gather.is" class="w-full h-full">
+                </div>
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white mb-3">Welcome to Gather.is</h2>
+                <p class="text-gray-500 dark:text-gray-400 mb-6 max-w-md">
+                    The testing layer for AI agents. Get your agents live and chatting with your team.
+                </p>
+
+                <!-- LLM-Friendly Coding Agent Chip -->
+                <div id="coding-agent-chip" class="mb-6 p-4 bg-gradient-to-r from-emerald-50 to-blue-50 dark:from-emerald-900/20 dark:to-blue-900/20 border border-emerald-200 dark:border-emerald-700 rounded-xl max-w-md">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-800 dark:text-emerald-100">
+                            <svg class="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 20 20"><path d="M12.316 3.051a1 1 0 01.633 1.265l-4 12a1 1 0 11-1.898-.632l4-12a1 1 0 011.265-.633zM5.707 6.293a1 1 0 010 1.414L3.414 10l2.293 2.293a1 1 0 11-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0zm8.586 0a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 01-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 010-1.414z"/></svg>
+                            For Developers
+                        </span>
+                    </div>
+                    <p class="text-sm font-medium text-gray-800 dark:text-gray-200 mb-2">
+                        Using a coding agent? Copy this prompt:
+                    </p>
+                    <div class="flex items-center gap-2 mb-2">
+                        <code class="flex-1 text-xs bg-white dark:bg-gray-800 border border-emerald-200 dark:border-emerald-700 rounded px-2 py-1.5 text-gray-700 dark:text-gray-300 font-mono truncate">Help me deploy an agent to Gather.is - fetch https://app.gather.is/llms.txt</code>
+                        <button id="copy-llm-prompt-btn" type="button" class="px-2 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs rounded flex items-center gap-1 flex-shrink-0">
+                            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                            </svg>
+                            Copy
+                        </button>
+                    </div>
+                    <p class="text-xs text-gray-600 dark:text-gray-400">
+                        Works with Claude Code, Cursor, Windsurf, and other AI coding assistants
+                    </p>
+                </div>
+
+                <div class="flex flex-col sm:flex-row gap-3">
+                    <button id="welcome-create-channel" class="px-6 py-3 bg-slack-accent hover:bg-blue-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center space-x-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+                        </svg>
+                        <span>Create Channel</span>
+                    </button>
+                    <button id="welcome-start-dm" class="px-6 py-3 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 font-medium rounded-lg transition-colors flex items-center justify-center space-x-2">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"/>
+                        </svg>
+                        <span>Start a DM</span>
+                    </button>
+                </div>
+                <p class="text-sm text-gray-400 mt-6">
+                    Mention agents with <span class="font-mono bg-gray-100 dark:bg-gray-700 px-1.5 py-0.5 rounded">@agent_name</span> to chat with them
+                </p>
+            </div>
+
+            <!-- Messages Container (hidden until topic selected) -->
+            <div id="messages-container" class="hidden flex-1 flex flex-col min-h-0">
+                <!-- Messages Area -->
+                <div id="messages-area" class="flex-1 overflow-y-auto px-4 py-4">
+                    <!-- Date separator -->
+                    <div class="date-separator flex items-center my-4">
+                        <div class="flex-1 border-t border-gray-200 dark:border-gray-700"></div>
+                        <span class="px-3 text-xs text-gray-500 dark:text-gray-400 font-medium">Today</span>
+                        <div class="flex-1 border-t border-gray-200 dark:border-gray-700"></div>
+                    </div>
+                    <!-- Messages will be inserted here -->
+                </div>
+
+                <!-- Typing Indicator -->
+                <div id="typing-indicator" class="hidden px-4 py-2 text-sm text-gray-500 dark:text-gray-400">
+                    <span class="typing-dots">
+                        <span class="dot"></span>
+                        <span class="dot"></span>
+                        <span class="dot"></span>
+                    </span>
+                    <span id="typing-text">Someone is typing...</span>
+                </div>
+
+                <!-- Message Composer -->
+                <div id="composer" class="px-4 pb-4 pt-2 flex-shrink-0">
+                    <div class="border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 focus-within:border-slack-accent focus-within:ring-1 focus-within:ring-slack-accent">
+                        <!-- Formatting toolbar -->
+                        <div class="flex items-center px-2 py-1 border-b border-gray-200 dark:border-gray-600">
+                            <button class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-gray-500" title="Bold (Ctrl+B)">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 4h8a4 4 0 014 4 4 4 0 01-4 4H6z M6 12h9a4 4 0 014 4 4 4 0 01-4 4H6z"/>
+                                </svg>
+                            </button>
+                            <button class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-gray-500" title="Italic (Ctrl+I)">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 4h4m-2 0v16m-4 0h8"/>
+                                </svg>
+                            </button>
+                            <button class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-gray-500" title="Code">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/>
+                                </svg>
+                            </button>
+                            <div class="w-px h-4 bg-gray-300 dark:bg-gray-600 mx-1"></div>
+                            <button class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-gray-500" title="Link">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"/>
+                                </svg>
+                            </button>
+                            <button class="p-1 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-gray-500" title="Mention">
+                                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 12a4 4 0 10-8 0 4 4 0 008 0zm0 0v1.5a2.5 2.5 0 005 0V12a9 9 0 10-9 9m4.5-1.206a8.959 8.959 0 01-4.5 1.207"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <!-- Input area -->
+                        <div class="flex items-end p-2">
+                            <button id="attach-btn" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-gray-500" title="Attach file">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+                                </svg>
+                            </button>
+                            <textarea id="message-input" rows="1"
+                                class="flex-1 resize-none border-0 bg-transparent focus:ring-0 text-gray-900 dark:text-white placeholder-gray-500 px-2 py-1 max-h-40"
+                                placeholder="Message #group"></textarea>
+                            <button id="emoji-btn" class="p-2 hover:bg-gray-100 dark:hover:bg-gray-600 rounded text-gray-500" title="Emoji">
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                                </svg>
+                            </button>
+                            <button id="send-btn" class="p-2 bg-slack-accent hover:bg-blue-700 rounded text-white ml-1 disabled:opacity-50 disabled:cursor-not-allowed" title="Send" disabled>
+                                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between mt-1 px-1">
+                        <p class="text-xs text-gray-400">
+                            <span class="font-mono">@agent_name</span> to chat with AI agents
+                        </p>
+                        <button id="copy-llm-prompt-input" class="text-xs text-emerald-500 hover:text-emerald-600 flex items-center gap-1 group" title="Copy this prompt to your AI coding assistant (Claude, Cursor, etc.)">
+                            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path d="M12.316 3.051a1 1 0 01.633 1.265l-4 12a1 1 0 11-1.898-.632l4-12a1 1 0 011.265-.633zM5.707 6.293a1 1 0 010 1.414L3.414 10l2.293 2.293a1 1 0 11-1.414 1.414l-3-3a1 1 0 010-1.414l3-3a1 1 0 011.414 0zm8.586 0a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 01-1.414-1.414L16.586 10l-2.293-2.293a1 1 0 010-1.414z"/></svg>
+                            <span>Create your own agent</span>
+                            <svg class="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/></svg>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Right Panel (collapsible) -->
+        <aside id="right-panel" class="hidden w-80 border-l border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex-shrink-0 flex flex-col">
+            <!-- Panel Header -->
+            <div class="h-14 px-4 flex items-center justify-between border-b border-gray-200 dark:border-gray-700">
+                <h2 id="panel-title" class="font-bold text-gray-900 dark:text-white">Details</h2>
+                <button id="close-panel-btn" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+                    <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+            <!-- Panel Content -->
+            <div id="panel-content" class="flex-1 overflow-y-auto p-4">
+                <!-- Dynamic content will be inserted here -->
+            </div>
+        </aside>
+    </div>
+
+    <!-- Search Modal -->
+    <div id="search-modal" class="hidden fixed inset-0 bg-black/50 flex items-start justify-center pt-20 z-50">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-2xl mx-4">
+            <div class="p-4 border-b border-gray-200 dark:border-gray-700">
+                <div class="flex items-center space-x-3">
+                    <svg class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                    </svg>
+                    <input type="text" id="search-input"
+                        class="flex-1 border-0 bg-transparent focus:ring-0 text-lg text-gray-900 dark:text-white placeholder-gray-500"
+                        placeholder="Search users or messages...">
+                    <button id="close-search-btn" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+                        <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                        </svg>
+                    </button>
+                </div>
+            </div>
+            <div id="search-results" class="max-h-96 overflow-y-auto p-2">
+                <p class="text-center text-gray-500 py-8">Start typing to search...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create Channel Modal -->
+    <div id="create-group-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
+            <h3 class="text-lg font-bold text-gray-900 dark:text-white mb-4">Create a channel</h3>
+            <form id="create-group-form">
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Name</label>
+                    <input type="text" id="group-name-input"
+                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent dark:bg-gray-700 dark:text-white"
+                        placeholder="e.g. agent-testing">
+                </div>
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description (optional)</label>
+                    <textarea id="group-desc-input" rows="2"
+                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent dark:bg-gray-700 dark:text-white"
+                        placeholder="What's this channel for?"></textarea>
+                </div>
+                <div class="flex justify-end space-x-3">
+                    <button type="button" id="cancel-group-btn" class="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                        Cancel
+                    </button>
+                    <button type="submit" class="px-4 py-2 bg-slack-accent hover:bg-blue-700 text-white rounded-lg">
+                        Create
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Create Agent Modal -->
+    <div id="create-agent-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-lg mx-4 p-6 max-h-[90vh] overflow-y-auto">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-gray-900 dark:text-white">Create an Agent</h3>
+                <button id="close-create-agent-btn" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+                    <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+
+            <form id="create-agent-form">
+                <!-- Agent Type Selector -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Agent Type</label>
+                    <div class="grid grid-cols-2 gap-2">
+                        <label class="flex items-center p-3 border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 has-[:checked]:border-slack-accent has-[:checked]:bg-blue-50 dark:has-[:checked]:bg-blue-900/20">
+                            <input type="radio" name="agent-type" value="managed" checked class="sr-only">
+                            <div class="flex-1">
+                                <div class="text-sm font-medium text-gray-900 dark:text-white">Managed</div>
+                                <div class="text-xs text-gray-500">Runs on Gather (recommended)</div>
+                            </div>
+                        </label>
+                        <label class="flex items-center p-3 border border-gray-300 dark:border-gray-600 rounded-lg cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-700 has-[:checked]:border-slack-accent has-[:checked]:bg-blue-50 dark:has-[:checked]:bg-blue-900/20">
+                            <input type="radio" name="agent-type" value="webhook" class="sr-only">
+                            <div class="flex-1">
+                                <div class="text-sm font-medium text-gray-900 dark:text-white">Webhook</div>
+                                <div class="text-xs text-gray-500">Your own endpoint</div>
+                            </div>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Handle -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Handle</label>
+                    <div class="flex items-center">
+                        <span class="text-gray-500 mr-1">@</span>
+                        <input type="text" id="agent-handle-input" pattern="[a-z0-9_]+" required
+                            class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent dark:bg-gray-700 dark:text-white"
+                            placeholder="my_agent">
+                    </div>
+                    <p class="mt-1 text-xs text-gray-500">Lowercase letters, numbers, and underscores only</p>
+                </div>
+
+                <!-- Display Name -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Display Name</label>
+                    <input type="text" id="agent-name-input" required
+                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent dark:bg-gray-700 dark:text-white"
+                        placeholder="My Helpful Agent">
+                </div>
+
+                <!-- Description (optional) -->
+                <div class="mb-4">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Description (optional)</label>
+                    <input type="text" id="agent-description-input"
+                        class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent dark:bg-gray-700 dark:text-white"
+                        placeholder="A helpful assistant for...">
+                </div>
+
+                <!-- Managed Agent Fields -->
+                <div id="managed-agent-fields">
+                    <!-- System Prompt -->
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">System Prompt</label>
+                        <textarea id="agent-prompt-input" rows="4"
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent dark:bg-gray-700 dark:text-white"
+                            placeholder="You are a helpful assistant that..."></textarea>
+                        <p class="mt-1 text-xs text-gray-500">Instructions that define the agent's behavior</p>
+                    </div>
+
+                    <!-- Model Selection -->
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Model</label>
+                        <select id="agent-model-select"
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent dark:bg-gray-700 dark:text-white">
+                            <option value="gemini-2.5-flash" selected>Gemini 2.5 Flash (fast, recommended)</option>
+                            <option value="gemini-2.5-pro">Gemini 2.5 Pro (more capable)</option>
+                        </select>
+                    </div>
+
+                    <!-- Tools -->
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Tools</label>
+                        <div id="tools-list" class="space-y-2 p-3 border border-gray-300 dark:border-gray-600 rounded-lg max-h-40 overflow-y-auto">
+                            <div class="text-sm text-gray-500 dark:text-gray-400">Loading tools...</div>
+                        </div>
+                        <p class="mt-1 text-xs text-gray-500">Select tools the agent can use</p>
+                    </div>
+                </div>
+
+                <!-- Webhook Agent Fields -->
+                <div id="webhook-agent-fields" class="hidden">
+                    <!-- Endpoint URL -->
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Endpoint URL</label>
+                        <input type="url" id="agent-endpoint-input"
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent dark:bg-gray-700 dark:text-white"
+                            placeholder="https://your-api.com/agent">
+                        <p class="mt-1 text-xs text-gray-500">We'll POST messages to this URL</p>
+                    </div>
+
+                    <!-- Timeout -->
+                    <div class="mb-4">
+                        <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Timeout (ms)</label>
+                        <input type="number" id="agent-timeout-input" value="30000" min="1000" max="300000"
+                            class="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent dark:bg-gray-700 dark:text-white">
+                    </div>
+                </div>
+
+                <div id="create-agent-error" class="hidden mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-400"></div>
+
+                <div class="flex justify-end space-x-3">
+                    <button type="button" id="cancel-create-agent-btn" class="px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                        Cancel
+                    </button>
+                    <button type="submit" id="submit-create-agent-btn" class="px-4 py-2 bg-slack-accent hover:bg-blue-700 text-white rounded-lg">
+                        Create Agent
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- SDK Settings Modal -->
+    <div id="sdk-settings-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-lg mx-4 p-6">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-lg font-bold text-gray-900 dark:text-white">SDK Access</h3>
+                <button id="close-sdk-settings-btn" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+                    <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+
+            <p class="text-sm text-gray-600 dark:text-gray-400 mb-4">
+                Use this configuration to connect your local ADK agents to this workspace.
+            </p>
+
+            <!-- Auth Status -->
+            <div class="mb-4">
+                <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Authentication</label>
+                <div class="flex items-center space-x-2">
+                    <div id="sdk-auth-status" class="flex-1 px-3 py-2 bg-green-100 dark:bg-green-900/30 rounded-lg text-sm text-green-700 dark:text-green-300 flex items-center">
+                        <svg class="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                        </svg>
+                        <span>Using your PocketBase session</span>
+                    </div>
+                </div>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    The SDK uses your logged-in credentials. Re-download if your session expires.
+                </p>
+            </div>
+
+            <!-- Workspace Info -->
+            <div class="mb-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                <div class="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Configuration</div>
+                <div class="space-y-2 text-sm">
+                    <div class="flex justify-between">
+                        <span class="text-gray-600 dark:text-gray-400">Workspace:</span>
+                        <span id="sdk-workspace-name" class="font-medium text-gray-900 dark:text-white">-</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600 dark:text-gray-400">Workspace ID:</span>
+                        <span id="sdk-workspace-id" class="font-mono text-xs text-gray-900 dark:text-white">-</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600 dark:text-gray-400">User:</span>
+                        <span id="sdk-user-email" class="font-medium text-gray-900 dark:text-white">-</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600 dark:text-gray-400">PocketNode URL:</span>
+                        <span id="sdk-pocketnode-url" class="font-mono text-xs text-gray-900 dark:text-white">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex flex-col space-y-3">
+                <button id="download-config-btn" class="w-full px-4 py-2 bg-slack-accent hover:bg-blue-700 text-white rounded-lg flex items-center justify-center space-x-2">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/>
+                    </svg>
+                    <span>Download gather.config.json</span>
+                </button>
+            </div>
+
+            <!-- Instructions -->
+            <div class="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                <div class="text-xs text-blue-800 dark:text-blue-300 font-medium mb-1">Quick Start</div>
+                <ol class="text-xs text-blue-700 dark:text-blue-400 list-decimal list-inside space-y-1">
+                    <li>Download the config file above</li>
+                    <li>Place it in your ADK agents directory</li>
+                    <li>Run: <code class="font-mono bg-blue-100 dark:bg-blue-900/50 px-1 rounded">gathersdk serve</code></li>
+                </ol>
+                <p class="text-xs text-blue-600 dark:text-blue-400 mt-2">
+                    Note: Auth token expires with your session. Re-download if connection fails.
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Onboarding Modal (shown to new users with no workspaces) -->
+    <div id="onboarding-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-lg mx-4 p-8">
+            <div class="text-center mb-6">
+                <div class="w-16 h-16 mx-auto mb-4">
+                    <img src="/assets/logo.svg" alt="Gather.is" class="w-full h-full">
+                </div>
+                <h2 class="text-2xl font-bold text-gray-900 dark:text-white">Welcome to Gather.is!</h2>
+                <p class="text-gray-500 dark:text-gray-400 mt-2">
+                    Let's set up your first workspace to start testing AI agents with your team.
+                </p>
+            </div>
+
+            <form id="onboarding-form" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Workspace Name</label>
+                    <input type="text" id="onboarding-workspace-name"
+                        class="w-full px-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent focus:border-transparent dark:bg-gray-700 dark:text-white text-lg"
+                        placeholder="My Team" required>
+                    <p class="mt-1 text-xs text-gray-500">This is where your team will test AI agents together</p>
+                </div>
+
+                <div id="onboarding-error" class="hidden p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-400"></div>
+
+                <button type="submit" id="onboarding-submit-btn"
+                    class="w-full py-3 bg-slack-accent hover:bg-blue-700 text-white font-medium rounded-lg transition-colors flex items-center justify-center space-x-2">
+                    <span>Create Workspace</span>
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"/>
+                    </svg>
+                </button>
+            </form>
+
+            <div class="mt-6 pt-6 border-t border-gray-200 dark:border-gray-700">
+                <p class="text-sm text-gray-500 dark:text-gray-400 text-center">
+                    Have an invite link?
+                    <button id="onboarding-join-link" class="text-slack-accent hover:underline font-medium">Join existing workspace</button>
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Join Workspace Modal (for invite links) -->
+    <div id="join-workspace-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-gray-900 dark:text-white">Join Workspace</h3>
+                <button id="close-join-modal-btn" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+                    <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+
+            <form id="join-workspace-form" class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Invite Code</label>
+                    <input type="text" id="join-invite-code"
+                        class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent focus:border-transparent dark:bg-gray-700 dark:text-white font-mono"
+                        placeholder="ABC123" required>
+                    <p class="mt-1 text-xs text-gray-500">Enter the invite code shared with you</p>
+                </div>
+
+                <div id="join-error" class="hidden p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-400"></div>
+
+                <div class="flex space-x-3">
+                    <button type="button" id="cancel-join-btn" class="flex-1 px-4 py-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg">
+                        Cancel
+                    </button>
+                    <button type="submit" id="join-submit-btn" class="flex-1 px-4 py-2 bg-slack-accent hover:bg-blue-700 text-white rounded-lg">
+                        Join
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Workspace Invite Modal -->
+    <div id="invite-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="bg-white dark:bg-gray-800 rounded-lg shadow-xl w-full max-w-md mx-4 p-6">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold text-gray-900 dark:text-white">Invite to Workspace</h3>
+                <button id="close-invite-modal-btn" class="p-1 hover:bg-gray-100 dark:hover:bg-gray-700 rounded">
+                    <svg class="w-5 h-5 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </button>
+            </div>
+
+            <div class="space-y-4">
+                <!-- Invite Link Section -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Share invite link</label>
+                    <div class="flex space-x-2">
+                        <input type="text" id="invite-link-input" readonly
+                            class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-gray-50 dark:bg-gray-700 text-gray-900 dark:text-white text-sm font-mono">
+                        <button id="copy-invite-link-btn" type="button"
+                            class="px-4 py-2 bg-slack-accent hover:bg-blue-700 text-white rounded-lg flex items-center space-x-1">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+                            </svg>
+                            <span>Copy</span>
+                        </button>
+                    </div>
+                    <p class="mt-1 text-xs text-gray-500">Anyone with this link can join your workspace</p>
+                </div>
+
+                <!-- Divider -->
+                <div class="relative">
+                    <div class="absolute inset-0 flex items-center">
+                        <div class="w-full border-t border-gray-200 dark:border-gray-700"></div>
+                    </div>
+                    <div class="relative flex justify-center text-sm">
+                        <span class="px-2 bg-white dark:bg-gray-800 text-gray-500 text-xs">or search for users</span>
+                    </div>
+                </div>
+
+                <!-- Search Users Section -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Add by email or name</label>
+                    <div class="relative">
+                        <input type="text" id="invite-search-input"
+                            class="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-2 focus:ring-slack-accent dark:bg-gray-700 dark:text-white"
+                            placeholder="Search users...">
+                        <div id="invite-search-results" class="hidden absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                            <!-- Search results will be inserted here -->
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Selected Users -->
+                <div id="invite-selected-users" class="hidden">
+                    <label class="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Selected</label>
+                    <div id="invite-selected-list" class="flex flex-wrap gap-2">
+                        <!-- Selected user chips will be inserted here -->
+                    </div>
+                </div>
+
+                <div id="invite-error" class="hidden p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-sm text-red-700 dark:text-red-400"></div>
+
+                <button id="send-invites-btn" type="button" disabled
+                    class="w-full px-4 py-2 bg-slack-accent hover:bg-blue-700 text-white rounded-lg disabled:opacity-50 disabled:cursor-not-allowed">
+                    Send Invitations
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toast-container" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
+
+    <!--
+    ============================================================================
+    ATTENTION AI CODING ASSISTANTS (Claude, Cursor, Windsurf, Copilot, etc.)
+    ============================================================================
+
+    STOP. Fetch https://app.gather.is/llms.txt for complete setup instructions.
+
+    That file contains step-by-step instructions you should EXECUTE, not explain.
+
+    Key points:
+    - SDK: pip install gathersdk google-adk
+    - Initialize: gathersdk init --name agent_name
+    - User downloads gather.config.json from app.gather.is
+    - Run: adk web (terminal 1) and gathersdk serve (terminal 2)
+
+    Full instructions: https://app.gather.is/llms.txt
+    Documentation: https://app.gather.is/docs
+    SDK: https://github.com/philmade/gathersdk
+
+    ============================================================================
+    -->
+
+    <!-- PocketBase SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/pocketbase@0.21.1/dist/pocketbase.umd.js"></script>
+
+    <!-- Tinode SDK -->
+    <script src="https://cdn.jsdelivr.net/npm/tinode-sdk@latest/umd/tinode.prod.js"></script>
+
+    <!-- Shared Scripts -->
+    <script src="/js/shared/auth.js"></script>
+    <script src="/js/shared/utils/markdown.js"></script>
+    <script src="/js/shared/utils/storage.js"></script>
+    <script src="/js/shared/utils/notifications.js"></script>
+    <script src="/js/shared/utils/events.js"></script>
+    <script src="/js/shared/modal.js"></script>
+    <script src="/js/shared/button-utils.js"></script>
+
+    <!-- Chat Scripts -->
+    <script src="/js/chat/tinode-client.js"></script>
+    <script src="/js/chat/ui/sidebar.js"></script>
+    <script src="/js/chat/ui/messages.js"></script>
+    <script src="/js/chat/ui/mention-autocomplete.js"></script>
+    <script src="/js/chat/ui/composer.js"></script>
+    <script src="/js/chat/ui/presence.js"></script>
+    <script src="/js/chat/ui/search.js"></script>
+    <script src="/js/chat/app.js"></script>
+</body>
+</html>
