@@ -126,6 +126,7 @@ func gelatoHeaders() http.Header {
 	h := http.Header{}
 	h.Set("X-API-KEY", os.Getenv("GELATO_API_KEY"))
 	h.Set("Content-Type", "application/json")
+	h.Set("User-Agent", "Gather/1.0")
 	return h
 }
 

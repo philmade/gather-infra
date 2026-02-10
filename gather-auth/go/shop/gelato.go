@@ -53,6 +53,7 @@ func PlaceGelatoOrder(productUID, designURL string, shipping map[string]string, 
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-API-KEY", apiKey)
+	req.Header.Set("User-Agent", "Gather/1.0")
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
