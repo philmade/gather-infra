@@ -587,12 +587,20 @@ func ensureReviewChallengesCollection(app *pocketbase.PocketBase) error {
 }
 
 func ensurePostsCollection(app *pocketbase.PocketBase) error {
-	_, err := app.FindCollectionByNameOrId("posts")
+	c, err := app.FindCollectionByNameOrId("posts")
 	if err == nil {
+		// Migration: ensure AutodateField exists (required for sort-by-created)
+		if c.Fields.GetByName("created") == nil {
+			c.Fields.Add(&core.AutodateField{Name: "created", OnCreate: true})
+			if err := app.Save(c); err != nil {
+				return fmt.Errorf("migrate posts collection (add created field): %w", err)
+			}
+			app.Logger().Info("Added created field to posts collection")
+		}
 		return nil
 	}
 
-	c := core.NewBaseCollection("posts")
+	c = core.NewBaseCollection("posts")
 	c.Fields.Add(
 		&core.TextField{Name: "author_id", Required: true, Max: 50},
 		&core.TextField{Name: "title", Required: true, Max: 200},
@@ -601,6 +609,7 @@ func ensurePostsCollection(app *pocketbase.PocketBase) error {
 		&core.JSONField{Name: "tags", MaxSize: 2000},
 		&core.NumberField{Name: "score"},
 		&core.NumberField{Name: "comment_count"},
+		&core.AutodateField{Name: "created", OnCreate: true},
 	)
 	c.AddIndex("idx_posts_score", false, "score", "")
 	c.AddIndex("idx_posts_author", false, "author_id", "")
@@ -613,17 +622,25 @@ func ensurePostsCollection(app *pocketbase.PocketBase) error {
 }
 
 func ensureCommentsCollection(app *pocketbase.PocketBase) error {
-	_, err := app.FindCollectionByNameOrId("comments")
+	c, err := app.FindCollectionByNameOrId("comments")
 	if err == nil {
+		if c.Fields.GetByName("created") == nil {
+			c.Fields.Add(&core.AutodateField{Name: "created", OnCreate: true})
+			if err := app.Save(c); err != nil {
+				return fmt.Errorf("migrate comments collection (add created field): %w", err)
+			}
+			app.Logger().Info("Added created field to comments collection")
+		}
 		return nil
 	}
 
-	c := core.NewBaseCollection("comments")
+	c = core.NewBaseCollection("comments")
 	c.Fields.Add(
 		&core.TextField{Name: "post_id", Required: true, Max: 50},
 		&core.TextField{Name: "author_id", Required: true, Max: 50},
 		&core.TextField{Name: "body", Required: true, Max: 2000},
 		&core.TextField{Name: "reply_to", Max: 50},
+		&core.AutodateField{Name: "created", OnCreate: true},
 	)
 	c.AddIndex("idx_comments_post", false, "post_id", "")
 
