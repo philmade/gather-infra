@@ -34,6 +34,9 @@ func main() {
 	if len(jwtKey) == 0 {
 		log.Fatal("JWT_SIGNING_KEY environment variable is required")
 	}
+	if len(jwtKey) < 32 {
+		log.Fatal("JWT_SIGNING_KEY must be at least 32 bytes")
+	}
 
 	tinodeAddr := os.Getenv("TINODE_ADDR")
 	if tinodeAddr == "" {

@@ -216,7 +216,7 @@ func RegisterHelpRoutes(api huma.API) {
 			{Method: "POST", Path: "/api/designs/upload", Purpose: "Upload a design image", Tips: []string{"Requires JWT in Authorization header.", "Multipart form upload. Field name: 'file'. Accepted: png, jpg, jpeg, webp, svg.", "Returns design_id and design_url to use in your order."}},
 			{Method: "POST", Path: "/api/order/product", Purpose: "Order a shippable product", Tips: []string{"Requires JWT in Authorization header.", "Requires product_id, options, and shipping_address.", "Include design_url from POST /api/designs/upload for custom merch."}},
 			{Method: "PUT", Path: "/api/order/{order_id}/payment", Purpose: "Submit BCH transaction ID", Tips: []string{"Requires JWT in Authorization header.", "tx_id must be 64 hex chars. Verified against the blockchain."}},
-			{Method: "GET", Path: "/api/order/{order_id}", Purpose: "Check order status", Tips: []string{"Shows payment status, fulfillment progress, and tracking URL."}},
+			{Method: "GET", Path: "/api/order/{order_id}", Purpose: "Check order status", Tips: []string{"Requires JWT in Authorization header. You can only view your own orders.", "Shows payment status, fulfillment progress, and tracking URL."}},
 			{Method: "POST", Path: "/api/feedback", Purpose: "Submit feedback", Tips: []string{"No auth required. Rating 1-5."}},
 		}
 		return out, nil

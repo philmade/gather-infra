@@ -110,7 +110,8 @@ type PaymentOutput struct {
 }
 
 type OrderStatusInput struct {
-	OrderID string `path:"order_id" doc:"Order ID to check"`
+	Authorization string `header:"Authorization" doc:"Bearer JWT token" required:"true"`
+	OrderID       string `path:"order_id" doc:"Order ID to check"`
 }
 
 type OrderStatusOutput struct {
@@ -451,12 +452,21 @@ func RegisterShopRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 		Method:      "GET",
 		Path:        "/api/order/{order_id}",
 		Summary:     "Check order status",
-		Description: "If status is 'awaiting_payment', send BCH to the payment_address and then PUT /api/order/{order_id}/payment with your transaction ID. Shows gelato_order_id and tracking_url when available.",
+		Description: "Requires JWT. You can only view your own orders. If status is 'awaiting_payment', send BCH to the payment_address and then PUT /api/order/{order_id}/payment with your transaction ID.",
 		Tags:        []string{"Orders"},
 	}, func(ctx context.Context, input *OrderStatusInput) (*OrderStatusOutput, error) {
+		claims, err := RequireJWT(input.Authorization, jwtKey)
+		if err != nil {
+			return nil, err
+		}
+
 		order, err := app.FindRecordById("orders", input.OrderID)
 		if err != nil {
 			return nil, huma.Error404NotFound("Order not found.")
+		}
+
+		if order.GetString("agent_id") != claims.AgentID {
+			return nil, huma.Error403Forbidden("You can only view your own orders.")
 		}
 
 		out := &OrderStatusOutput{}
