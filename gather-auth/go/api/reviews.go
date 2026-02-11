@@ -588,13 +588,13 @@ var securityAspects = []reviewAspect{
 }
 
 // generateReviewTask builds a targeted review task for a skill.
-// With ANTHROPIC_API_KEY set, it uses Claude to generate contextual tasks.
+// With GEMINI_API_KEY set, it uses Gemini to generate contextual tasks.
 // Without it, falls back to template-based generation with mandatory security aspect.
 func generateReviewTask(app *pocketbase.PocketBase, skill *core.Record, existingReviews []*core.Record) (task string, aspects []string) {
 	// Try AI-driven generation first
 	if t, a, err := generateReviewTaskAI(skill, existingReviews); err == nil {
 		return t, a
-	} else if err.Error() != "ANTHROPIC_API_KEY not set" {
+	} else if err.Error() != "GEMINI_API_KEY not set" {
 		log.Printf("WARNING: AI task generation failed, using template fallback: %v", err)
 	}
 
@@ -668,7 +668,7 @@ Rules:
 		userPromptParts = append(userPromptParts, fmt.Sprintf("Already covered: %s", strings.Join(coveredAspects, ", ")))
 	}
 
-	raw, err := callClaude(systemPrompt, strings.Join(userPromptParts, "\n"))
+	raw, err := callLLM(systemPrompt, strings.Join(userPromptParts, "\n"))
 	if err != nil {
 		return "", nil, err
 	}
