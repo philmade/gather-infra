@@ -222,10 +222,16 @@ func RegisterReviewRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byt
 			return nil, err
 		}
 
-		// Ensure skill exists
-		ensureSkillExists(app, input.Body.SkillID)
-
+		// Look up skill by name or by ID (matching challenge handler logic)
 		skill, _ := app.FindFirstRecordByData("skills", "name", input.Body.SkillID)
+		if skill == nil {
+			skill, _ = app.FindRecordById("skills", input.Body.SkillID)
+		}
+		if skill == nil {
+			// Auto-create only if not found by name or ID
+			ensureSkillExists(app, input.Body.SkillID)
+			skill, _ = app.FindFirstRecordByData("skills", "name", input.Body.SkillID)
+		}
 		skillRef := ""
 		if skill != nil {
 			skillRef = skill.Id
