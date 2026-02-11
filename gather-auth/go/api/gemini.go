@@ -11,44 +11,45 @@ import (
 	"time"
 )
 
-const claudeMessagesURL = "https://api.anthropic.com/v1/messages"
-const claudeModel = "claude-sonnet-4-5-20250929"
+const geminiModel = "gemini-2.0-flash"
 
-type claudeMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type claudeRequest struct {
-	Model     string          `json:"model"`
-	MaxTokens int             `json:"max_tokens"`
-	System    string          `json:"system,omitempty"`
-	Messages  []claudeMessage `json:"messages"`
-}
-
-type claudeContentBlock struct {
-	Type string `json:"type"`
+type geminiPart struct {
 	Text string `json:"text"`
 }
 
-type claudeResponse struct {
-	Content []claudeContentBlock `json:"content"`
+type geminiContent struct {
+	Parts []geminiPart `json:"parts"`
 }
 
-// callClaude sends a request to the Claude API and returns the first text content block.
-func callClaude(systemPrompt, userPrompt string) (string, error) {
-	apiKey := os.Getenv("ANTHROPIC_API_KEY")
+type geminiRequest struct {
+	SystemInstruction *geminiContent  `json:"system_instruction,omitempty"`
+	Contents          []geminiContent `json:"contents"`
+}
+
+type geminiCandidate struct {
+	Content geminiContent `json:"content"`
+}
+
+type geminiResponse struct {
+	Candidates []geminiCandidate `json:"candidates"`
+}
+
+// callLLM sends a request to the Gemini API and returns the first text response.
+func callLLM(systemPrompt, userPrompt string) (string, error) {
+	apiKey := os.Getenv("GOOGLE_API_KEY")
 	if apiKey == "" {
-		return "", fmt.Errorf("ANTHROPIC_API_KEY not set")
+		return "", fmt.Errorf("GOOGLE_API_KEY not set")
 	}
 
-	payload := claudeRequest{
-		Model:     claudeModel,
-		MaxTokens: 512,
-		System:    systemPrompt,
-		Messages: []claudeMessage{
-			{Role: "user", Content: userPrompt},
+	payload := geminiRequest{
+		Contents: []geminiContent{
+			{Parts: []geminiPart{{Text: userPrompt}}},
 		},
+	}
+	if systemPrompt != "" {
+		payload.SystemInstruction = &geminiContent{
+			Parts: []geminiPart{{Text: systemPrompt}},
+		}
 	}
 
 	body, err := json.Marshal(payload)
@@ -56,13 +57,12 @@ func callClaude(systemPrompt, userPrompt string) (string, error) {
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", claudeMessagesURL, bytes.NewReader(body))
+	url := fmt.Sprintf("https://generativelanguage.googleapis.com/v1beta/models/%s:generateContent?key=%s", geminiModel, apiKey)
+	req, err := http.NewRequest("POST", url, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", apiKey)
-	req.Header.Set("anthropic-version", "2023-06-01")
 
 	client := &http.Client{Timeout: 15 * time.Second}
 	resp, err := client.Do(req)
@@ -77,21 +77,22 @@ func callClaude(systemPrompt, userPrompt string) (string, error) {
 	}
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("claude API status %d: %s", resp.StatusCode, string(respBody))
+		return "", fmt.Errorf("gemini API status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	var result claudeResponse
+	var result geminiResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return "", fmt.Errorf("unmarshal response: %w", err)
 	}
 
-	for _, block := range result.Content {
-		if block.Type == "text" && block.Text != "" {
-			return block.Text, nil
+	if len(result.Candidates) > 0 && len(result.Candidates[0].Content.Parts) > 0 {
+		text := result.Candidates[0].Content.Parts[0].Text
+		if text != "" {
+			return text, nil
 		}
 	}
 
-	return "", fmt.Errorf("empty response from Claude API")
+	return "", fmt.Errorf("empty response from Gemini API")
 }
 
 // stripCodeFences removes markdown code fences (```json ... ```) wrapping JSON content.

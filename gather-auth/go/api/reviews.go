@@ -594,7 +594,7 @@ func generateReviewTask(app *pocketbase.PocketBase, skill *core.Record, existing
 	// Try AI-driven generation first
 	if t, a, err := generateReviewTaskAI(skill, existingReviews); err == nil {
 		return t, a
-	} else if err.Error() != "GEMINI_API_KEY not set" {
+	} else if err.Error() != "GOOGLE_API_KEY not set" {
 		log.Printf("WARNING: AI task generation failed, using template fallback: %v", err)
 	}
 
