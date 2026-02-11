@@ -209,6 +209,9 @@ func ensureCollections(app *pocketbase.PocketBase) error {
 	if err := ensureMessagesCollection(app); err != nil {
 		return err
 	}
+	if err := ensureReviewChallengesCollection(app); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -266,17 +269,35 @@ func ensureSDKTokensCollection(app *pocketbase.PocketBase) error {
 }
 
 func ensureSkillsCollection(app *pocketbase.PocketBase) error {
-	_, err := app.FindCollectionByNameOrId("skills")
+	c, err := app.FindCollectionByNameOrId("skills")
 	if err == nil {
+		// Collection exists — ensure "url" field is present (migration)
+		if c.Fields.GetByName("url") == nil {
+			c.Fields.Add(&core.URLField{Name: "url"})
+			if err := app.Save(c); err != nil {
+				return fmt.Errorf("migrate skills collection (add url field): %w", err)
+			}
+			app.Logger().Info("Added url field to skills collection")
+		}
+		// Ensure "install_required" field is present (migration)
+		if c.Fields.GetByName("install_required") == nil {
+			c.Fields.Add(&core.BoolField{Name: "install_required"})
+			if err := app.Save(c); err != nil {
+				return fmt.Errorf("migrate skills collection (add install_required field): %w", err)
+			}
+			app.Logger().Info("Added install_required field to skills collection")
+		}
 		return nil
 	}
 
-	c := core.NewBaseCollection("skills")
+	c = core.NewBaseCollection("skills")
 	c.Fields.Add(
 		&core.TextField{Name: "name", Required: true, Max: 200},
 		&core.TextField{Name: "description", Max: 2000},
 		&core.TextField{Name: "source", Max: 500},
 		&core.TextField{Name: "category", Max: 100},
+		&core.URLField{Name: "url"},
+		&core.BoolField{Name: "install_required"},
 		&core.NumberField{Name: "installs"},
 		&core.NumberField{Name: "review_count"},
 		&core.NumberField{Name: "avg_score"},
@@ -294,12 +315,28 @@ func ensureSkillsCollection(app *pocketbase.PocketBase) error {
 }
 
 func ensureReviewsCollection(app *pocketbase.PocketBase) error {
-	_, err := app.FindCollectionByNameOrId("reviews")
+	c, err := app.FindCollectionByNameOrId("reviews")
 	if err == nil {
+		// Collection exists — ensure "verified_reviewer" field is present (migration)
+		if c.Fields.GetByName("verified_reviewer") == nil {
+			c.Fields.Add(&core.BoolField{Name: "verified_reviewer"})
+			if err := app.Save(c); err != nil {
+				return fmt.Errorf("migrate reviews collection (add verified_reviewer field): %w", err)
+			}
+			app.Logger().Info("Added verified_reviewer field to reviews collection")
+		}
+		// Ensure "challenge" field is present (migration for review challenge protocol)
+		if c.Fields.GetByName("challenge") == nil {
+			c.Fields.Add(&core.TextField{Name: "challenge", Max: 50})
+			if err := app.Save(c); err != nil {
+				return fmt.Errorf("migrate reviews collection (add challenge field): %w", err)
+			}
+			app.Logger().Info("Added challenge field to reviews collection")
+		}
 		return nil
 	}
 
-	c := core.NewBaseCollection("reviews")
+	c = core.NewBaseCollection("reviews")
 	c.Fields.Add(
 		&core.TextField{Name: "skill", Required: true},
 		&core.TextField{Name: "agent_id"},
@@ -321,6 +358,8 @@ func ensureReviewsCollection(app *pocketbase.PocketBase) error {
 		&core.NumberField{Name: "execution_time_ms"},
 		&core.TextField{Name: "cli_output", Max: 100000},
 		&core.TextField{Name: "proof"},
+		&core.BoolField{Name: "verified_reviewer"},
+		&core.TextField{Name: "challenge", Max: 50},
 	)
 	c.AddIndex("idx_reviews_skill", false, "skill", "")
 	c.AddIndex("idx_reviews_status", false, "status", "")
@@ -500,6 +539,34 @@ func ensureMessagesCollection(app *pocketbase.PocketBase) error {
 		return fmt.Errorf("create messages collection: %w", err)
 	}
 	app.Logger().Info("Created messages collection")
+	return nil
+}
+
+func ensureReviewChallengesCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("review_challenges")
+	if err == nil {
+		return nil
+	}
+
+	c := core.NewBaseCollection("review_challenges")
+	c.Fields.Add(
+		&core.TextField{Name: "agent_id", Required: true, Max: 50},
+		&core.TextField{Name: "skill", Required: true},
+		&core.TextField{Name: "skill_name", Max: 200},
+		&core.TextField{Name: "totem", Required: true, Max: 50},
+		&core.TextField{Name: "task", Max: 5000},
+		&core.JSONField{Name: "aspects", MaxSize: 2000},
+		&core.TextField{Name: "expires", Max: 50},
+		&core.BoolField{Name: "used"},
+	)
+
+	c.AddIndex("idx_challenges_agent", false, "agent_id", "")
+	c.AddIndex("idx_challenges_totem", true, "totem", "")
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create review_challenges collection: %w", err)
+	}
+	app.Logger().Info("Created review_challenges collection")
 	return nil
 }
 

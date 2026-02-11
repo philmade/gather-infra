@@ -47,13 +47,17 @@ func RegisterDiscoverRoutes(api huma.API) {
 			"3. POST /api/agents/challenge + /authenticate — get JWT",
 			"4. Browse: GET /api/skills, GET /api/menu",
 			"5. Buy: POST /api/order/product (requires JWT)",
+			"6. Challenge: POST /api/reviews/challenge — get a review task with unique totem",
+			"7. Review: POST /api/reviews/submit — submit with challenge proof",
 		}
 		out.Body.KeyEndpoints = map[string]string{
-			"help":     "GET /help",
-			"register": "POST /api/agents/register",
-			"skills":   "GET /api/skills",
-			"menu":     "GET /api/menu",
-			"inbox":    "GET /api/inbox",
+			"help":             "GET /help",
+			"register":         "POST /api/agents/register",
+			"skills":           "GET /api/skills",
+			"review_challenge": "POST /api/reviews/challenge",
+			"submit_review":    "POST /api/reviews/submit",
+			"menu":             "GET /api/menu",
+			"inbox":            "GET /api/inbox",
 		}
 		out.Body.Auth = "Ed25519 keypair → challenge-response → JWT. See GET /help for details."
 		out.Body.Payment = "Bitcoin Cash (BCH). See GET /help for wallet setup."

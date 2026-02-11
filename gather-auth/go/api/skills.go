@@ -20,6 +20,8 @@ type SkillItem struct {
 	Description      string   `json:"description,omitempty"`
 	Source           string   `json:"source,omitempty"`
 	Category         string   `json:"category,omitempty"`
+	URL              string   `json:"url,omitempty"`
+	InstallRequired  bool     `json:"install_required"`
 	Installs         float64  `json:"installs"`
 	ReviewCount      float64  `json:"review_count"`
 	AvgScore         *float64 `json:"avg_score"`
@@ -73,11 +75,13 @@ type GetSkillOutput struct {
 type CreateSkillInput struct {
 	Authorization string `header:"Authorization" doc:"Bearer JWT token" required:"true"`
 	Body          struct {
-		ID          string `json:"id" doc:"Unique skill identifier (e.g. 'anthropics/pdf')" minLength:"1"`
-		Name        string `json:"name" doc:"Display name" minLength:"1"`
-		Description string `json:"description,omitempty" doc:"Short description" maxLength:"2000"`
-		Source      string `json:"source,omitempty" doc:"Source: 'skills.sh' or 'github'"`
-		Category    string `json:"category,omitempty" doc:"Category (frontend, backend, devtools, security, ai-agents, mobile, content, design, data, general)"`
+		ID              string `json:"id" doc:"Unique skill identifier (e.g. 'anthropics/pdf')" minLength:"1"`
+		Name            string `json:"name" doc:"Display name" minLength:"1"`
+		Description     string `json:"description,omitempty" doc:"Short description" maxLength:"2000"`
+		Source          string `json:"source,omitempty" doc:"Source: skills.sh, github, api, url"`
+		Category        string `json:"category,omitempty" doc:"Category (frontend, backend, devtools, security, ai-agents, mobile, content, design, data, api, service, general)"`
+		URL             string `json:"url,omitempty" doc:"URL of the API/endpoint/service (required for api/service categories)" maxLength:"500"`
+		InstallRequired *bool  `json:"install_required,omitempty" doc:"Whether the skill requires local installation (default false)"`
 	}
 }
 
@@ -98,12 +102,16 @@ var sortMap = map[string]string{
 	"newest":   "",
 }
 
-var validSources = map[string]bool{"skills.sh": true, "github": true}
+var validSources = map[string]bool{
+	"skills.sh": true, "github": true,
+	"api": true, "url": true,
+}
 
 var validCategories = map[string]bool{
 	"frontend": true, "backend": true, "devtools": true, "security": true,
 	"ai-agents": true, "mobile": true, "content": true, "design": true,
 	"data": true, "general": true,
+	"api": true, "service": true,
 }
 
 // -----------------------------------------------------------------------------
@@ -246,6 +254,16 @@ func RegisterSkillRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte
 			category = ""
 		}
 
+		// URL is required for api/service categories
+		if (category == "api" || category == "service") && input.Body.URL == "" {
+			return nil, huma.Error422UnprocessableEntity("URL is required for api/service skills.")
+		}
+		if input.Body.URL != "" {
+			if !strings.HasPrefix(input.Body.URL, "http://") && !strings.HasPrefix(input.Body.URL, "https://") {
+				return nil, huma.Error422UnprocessableEntity("URL must start with http:// or https://")
+			}
+		}
+
 		collection, err := app.FindCollectionByNameOrId("skills")
 		if err != nil {
 			return nil, huma.Error500InternalServerError("skills collection not found")
@@ -256,6 +274,12 @@ func RegisterSkillRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte
 		record.Set("description", input.Body.Description)
 		record.Set("source", source)
 		record.Set("category", category)
+		if input.Body.URL != "" {
+			record.Set("url", input.Body.URL)
+		}
+		if input.Body.InstallRequired != nil && *input.Body.InstallRequired {
+			record.Set("install_required", true)
+		}
 
 		if err := app.Save(record); err != nil {
 			return nil, huma.Error500InternalServerError("Failed to create skill")
@@ -270,14 +294,16 @@ func RegisterSkillRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte
 
 func recordToSkillItem(r *core.Record) SkillItem {
 	item := SkillItem{
-		ID:          r.Id,
-		Name:        r.GetString("name"),
-		Description: r.GetString("description"),
-		Source:      r.GetString("source"),
-		Category:    r.GetString("category"),
-		Installs:    r.GetFloat("installs"),
-		ReviewCount: r.GetFloat("review_count"),
-		Created:     fmt.Sprintf("%v", r.GetDateTime("created")),
+		ID:              r.Id,
+		Name:            r.GetString("name"),
+		Description:     r.GetString("description"),
+		Source:          r.GetString("source"),
+		Category:        r.GetString("category"),
+		URL:             r.GetString("url"),
+		InstallRequired: r.GetBool("install_required"),
+		Installs:        r.GetFloat("installs"),
+		ReviewCount:     r.GetFloat("review_count"),
+		Created:         fmt.Sprintf("%v", r.GetDateTime("created")),
 	}
 	if v := r.GetFloat("avg_score"); v > 0 {
 		item.AvgScore = &v
