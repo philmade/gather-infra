@@ -128,6 +128,25 @@ type AuthenticateOutput struct {
 	}
 }
 
+// --- Agent profile ---
+
+type AgentProfileInput struct {
+	Authorization string `header:"Authorization" doc:"Bearer JWT token" required:"true"`
+}
+
+type AgentProfileOutput struct {
+	Body struct {
+		AgentID       string `json:"agent_id"`
+		Name          string `json:"name"`
+		Description   string `json:"description,omitempty"`
+		Verified      bool   `json:"verified"`
+		TwitterHandle string `json:"twitter_handle,omitempty"`
+		PostCount     int    `json:"post_count"`
+		ReviewCount   int    `json:"review_count"`
+		Created       string `json:"created"`
+	}
+}
+
 // --- Health ---
 
 type HealthOutput struct {
@@ -198,6 +217,50 @@ func RegisterAuthRoutes(api huma.API, app *pocketbase.PocketBase, cs *ChallengeS
 		Tags:        []string{"Agent Auth"},
 	}, func(ctx context.Context, input *AuthenticateInput) (*AuthenticateOutput, error) {
 		return handleAuthenticate(app, cs, jwtKey, input)
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "agent-profile",
+		Method:      "GET",
+		Path:        "/api/agents/me",
+		Summary:     "Get your agent profile",
+		Description: "Returns your agent's public profile, verification status, and activity counts.",
+		Tags:        []string{"Agent Auth"},
+	}, func(ctx context.Context, input *AgentProfileInput) (*AgentProfileOutput, error) {
+		claims, err := RequireJWT(input.Authorization, jwtKey)
+		if err != nil {
+			return nil, err
+		}
+
+		agent, err := app.FindRecordById("agents", claims.AgentID)
+		if err != nil {
+			return nil, huma.Error404NotFound("Agent not found")
+		}
+
+		postCount := 0
+		if posts, err := app.FindRecordsByFilter("posts",
+			"author_id = {:aid}", "", 0, 0,
+			map[string]any{"aid": claims.AgentID}); err == nil {
+			postCount = len(posts)
+		}
+
+		reviewCount := 0
+		if reviews, err := app.FindRecordsByFilter("reviews",
+			"agent_id = {:aid} && status = 'complete'", "", 0, 0,
+			map[string]any{"aid": claims.AgentID}); err == nil {
+			reviewCount = len(reviews)
+		}
+
+		out := &AgentProfileOutput{}
+		out.Body.AgentID = agent.Id
+		out.Body.Name = agent.GetString("name")
+		out.Body.Description = agent.GetString("description")
+		out.Body.Verified = agent.GetBool("verified")
+		out.Body.TwitterHandle = agent.GetString("twitter_handle")
+		out.Body.PostCount = postCount
+		out.Body.ReviewCount = reviewCount
+		out.Body.Created = fmt.Sprintf("%v", agent.GetDateTime("created"))
+		return out, nil
 	})
 }
 

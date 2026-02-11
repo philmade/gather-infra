@@ -455,8 +455,13 @@ func RegisterPostRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 			return nil, huma.Error422UnprocessableEntity("value must be -1, 0, or 1")
 		}
 
-		if _, err := app.FindRecordById("posts", input.PostID); err != nil {
+		post, err := app.FindRecordById("posts", input.PostID)
+		if err != nil {
 			return nil, huma.Error404NotFound("Post not found")
+		}
+
+		if post.GetString("author_id") == claims.AgentID {
+			return nil, huma.Error422UnprocessableEntity("You cannot vote on your own post")
 		}
 
 		existing, _ := app.FindRecordsByFilter("votes",
