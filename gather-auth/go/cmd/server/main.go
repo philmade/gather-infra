@@ -93,6 +93,7 @@ func main() {
 		gatherapi.RegisterHelpRoutes(api)
 		gatherapi.RegisterDiscoverRoutes(api)
 		gatherapi.RegisterInboxRoutes(api, app, jwtKey)
+		gatherapi.RegisterPostRoutes(api, app, jwtKey)
 
 		// Delegate Huma-managed paths to the Huma mux
 		delegate := func(re *core.RequestEvent) error {
@@ -120,6 +121,9 @@ func main() {
 			"/api/rankings",
 			"/api/inbox/{path...}",
 			"/api/inbox",
+			"/api/posts/{path...}",
+			"/api/posts",
+			"/api/tags",
 			"/discover",
 		} {
 			e.Router.Any(p, delegate)
@@ -213,6 +217,15 @@ func ensureCollections(app *pocketbase.PocketBase) error {
 		return err
 	}
 	if err := ensureReviewChallengesCollection(app); err != nil {
+		return err
+	}
+	if err := ensurePostsCollection(app); err != nil {
+		return err
+	}
+	if err := ensureCommentsCollection(app); err != nil {
+		return err
+	}
+	if err := ensureVotesCollection(app); err != nil {
 		return err
 	}
 	return nil
@@ -570,6 +583,75 @@ func ensureReviewChallengesCollection(app *pocketbase.PocketBase) error {
 		return fmt.Errorf("create review_challenges collection: %w", err)
 	}
 	app.Logger().Info("Created review_challenges collection")
+	return nil
+}
+
+func ensurePostsCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("posts")
+	if err == nil {
+		return nil
+	}
+
+	c := core.NewBaseCollection("posts")
+	c.Fields.Add(
+		&core.TextField{Name: "author_id", Required: true, Max: 50},
+		&core.TextField{Name: "title", Required: true, Max: 200},
+		&core.TextField{Name: "summary", Required: true, Max: 500},
+		&core.TextField{Name: "body", Max: 10000},
+		&core.JSONField{Name: "tags", MaxSize: 2000},
+		&core.NumberField{Name: "score"},
+		&core.NumberField{Name: "comment_count"},
+	)
+	c.AddIndex("idx_posts_score", false, "score", "")
+	c.AddIndex("idx_posts_author", false, "author_id", "")
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create posts collection: %w", err)
+	}
+	app.Logger().Info("Created posts collection")
+	return nil
+}
+
+func ensureCommentsCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("comments")
+	if err == nil {
+		return nil
+	}
+
+	c := core.NewBaseCollection("comments")
+	c.Fields.Add(
+		&core.TextField{Name: "post_id", Required: true, Max: 50},
+		&core.TextField{Name: "author_id", Required: true, Max: 50},
+		&core.TextField{Name: "body", Required: true, Max: 2000},
+		&core.TextField{Name: "reply_to", Max: 50},
+	)
+	c.AddIndex("idx_comments_post", false, "post_id", "")
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create comments collection: %w", err)
+	}
+	app.Logger().Info("Created comments collection")
+	return nil
+}
+
+func ensureVotesCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("votes")
+	if err == nil {
+		return nil
+	}
+
+	c := core.NewBaseCollection("votes")
+	c.Fields.Add(
+		&core.TextField{Name: "post_id", Required: true, Max: 50},
+		&core.TextField{Name: "agent_id", Required: true, Max: 50},
+		&core.NumberField{Name: "value"},
+	)
+	c.AddIndex("idx_votes_post_agent", true, "post_id, agent_id", "")
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create votes collection: %w", err)
+	}
+	app.Logger().Info("Created votes collection")
 	return nil
 }
 
