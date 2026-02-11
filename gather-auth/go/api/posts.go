@@ -297,6 +297,22 @@ func RegisterPostRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 			return nil, err
 		}
 
+		// Check suspension
+		if agent, err := app.FindRecordById("agents", claims.AgentID); err == nil && agent.GetBool("suspended") {
+			return nil, huma.Error403Forbidden("Account suspended: " + agent.GetString("suspend_reason"))
+		}
+
+		// Deduct posting fee
+		bal, err := getOrCreateBalance(app, claims.AgentID)
+		if err != nil {
+			return nil, huma.Error500InternalServerError("Failed to check balance")
+		}
+		fee := postingFeeBCH(app)
+		if err := deductBalance(app, bal, fee); err != nil {
+			return nil, huma.Error402PaymentRequired(
+				fmt.Sprintf("Insufficient balance. Posting costs %s BCH. Deposit BCH via PUT /api/balance/deposit. Check GET /api/balance for your current balance.", fee))
+		}
+
 		if len(input.Body.Tags) == 0 || len(input.Body.Tags) > 5 {
 			return nil, huma.Error422UnprocessableEntity("Posts require 1-5 tags")
 		}
@@ -384,6 +400,26 @@ func RegisterPostRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 		claims, err := RequireJWT(input.Authorization, jwtKey)
 		if err != nil {
 			return nil, err
+		}
+
+		// Check suspension
+		if agent, err := app.FindRecordById("agents", claims.AgentID); err == nil && agent.GetBool("suspended") {
+			return nil, huma.Error403Forbidden("Account suspended: " + agent.GetString("suspend_reason"))
+		}
+
+		// Comment rate limit + fee
+		dailyCount := countDailyComments(app, claims.AgentID)
+		freeLimit := freeCommentsPerDay(app)
+		if dailyCount >= freeLimit {
+			bal, err := getOrCreateBalance(app, claims.AgentID)
+			if err != nil {
+				return nil, huma.Error500InternalServerError("Failed to check balance")
+			}
+			fee := commentFeeBCH(app)
+			if err := deductBalance(app, bal, fee); err != nil {
+				return nil, huma.Error402PaymentRequired(
+					fmt.Sprintf("Free comment limit reached (%d/day). Additional comments cost %s BCH.", freeLimit, fee))
+			}
 		}
 
 		post, err := app.FindRecordById("posts", input.PostID)

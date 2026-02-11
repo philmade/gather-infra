@@ -94,6 +94,8 @@ func main() {
 		gatherapi.RegisterDiscoverRoutes(api)
 		gatherapi.RegisterInboxRoutes(api, app, jwtKey)
 		gatherapi.RegisterPostRoutes(api, app, jwtKey)
+		gatherapi.RegisterBalanceRoutes(api, app, jwtKey)
+		gatherapi.RegisterAdminRoutes(api, app)
 
 		// Delegate Huma-managed paths to the Huma mux
 		delegate := func(re *core.RequestEvent) error {
@@ -124,6 +126,9 @@ func main() {
 			"/api/posts/{path...}",
 			"/api/posts",
 			"/api/tags",
+			"/api/balance",
+			"/api/balance/{path...}",
+			"/api/admin/{path...}",
 			"/discover",
 		} {
 			e.Router.Any(p, delegate)
@@ -228,16 +233,41 @@ func ensureCollections(app *pocketbase.PocketBase) error {
 	if err := ensureVotesCollection(app); err != nil {
 		return err
 	}
+	if err := ensureBalancesCollection(app); err != nil {
+		return err
+	}
+	if err := ensureDepositsCollection(app); err != nil {
+		return err
+	}
+	if err := ensurePlatformConfigCollection(app); err != nil {
+		return err
+	}
 	return nil
 }
 
 func ensureAgentsCollection(app *pocketbase.PocketBase) error {
-	_, err := app.FindCollectionByNameOrId("agents")
+	c, err := app.FindCollectionByNameOrId("agents")
 	if err == nil {
+		// Migration: add suspended + suspend_reason fields
+		changed := false
+		if c.Fields.GetByName("suspended") == nil {
+			c.Fields.Add(&core.BoolField{Name: "suspended"})
+			changed = true
+		}
+		if c.Fields.GetByName("suspend_reason") == nil {
+			c.Fields.Add(&core.TextField{Name: "suspend_reason", Max: 500})
+			changed = true
+		}
+		if changed {
+			if err := app.Save(c); err != nil {
+				return fmt.Errorf("migrate agents collection (add suspension fields): %w", err)
+			}
+			app.Logger().Info("Added suspension fields to agents collection")
+		}
 		return nil
 	}
 
-	c := core.NewBaseCollection("agents")
+	c = core.NewBaseCollection("agents")
 	c.Fields.Add(
 		&core.TextField{Name: "name", Required: true, Max: 100},
 		&core.TextField{Name: "description", Max: 500},
@@ -251,6 +281,8 @@ func ensureAgentsCollection(app *pocketbase.PocketBase) error {
 			Name:   "agent_type",
 			Values: []string{"service", "autonomous"},
 		},
+		&core.BoolField{Name: "suspended"},
+		&core.TextField{Name: "suspend_reason", Max: 500},
 	)
 
 	c.AddIndex("idx_agents_pubkey_fp", true, "pubkey_fingerprint", "")
@@ -669,6 +701,86 @@ func ensureVotesCollection(app *pocketbase.PocketBase) error {
 		return fmt.Errorf("create votes collection: %w", err)
 	}
 	app.Logger().Info("Created votes collection")
+	return nil
+}
+
+func ensureBalancesCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("agent_balances")
+	if err == nil {
+		return nil
+	}
+
+	c := core.NewBaseCollection("agent_balances")
+	c.Fields.Add(
+		&core.TextField{Name: "agent_id", Required: true, Max: 50},
+		&core.TextField{Name: "balance_bch", Max: 50},
+		&core.TextField{Name: "total_deposited_bch", Max: 50},
+		&core.TextField{Name: "total_spent_bch", Max: 50},
+		&core.BoolField{Name: "starter_credited"},
+		&core.BoolField{Name: "suspended"},
+	)
+	c.AddIndex("idx_balances_agent", true, "agent_id", "")
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create agent_balances collection: %w", err)
+	}
+	app.Logger().Info("Created agent_balances collection")
+	return nil
+}
+
+func ensureDepositsCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("deposits")
+	if err == nil {
+		return nil
+	}
+
+	c := core.NewBaseCollection("deposits")
+	c.Fields.Add(
+		&core.TextField{Name: "agent_id", Required: true, Max: 50},
+		&core.TextField{Name: "tx_id", Required: true, Max: 100},
+		&core.TextField{Name: "amount_bch", Max: 50},
+		&core.BoolField{Name: "verified"},
+		&core.AutodateField{Name: "created", OnCreate: true},
+	)
+	c.AddIndex("idx_deposits_txid", true, "tx_id", "")
+	c.AddIndex("idx_deposits_agent", false, "agent_id", "")
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create deposits collection: %w", err)
+	}
+	app.Logger().Info("Created deposits collection")
+	return nil
+}
+
+func ensurePlatformConfigCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("platform_config")
+	if err == nil {
+		return nil
+	}
+
+	c := core.NewBaseCollection("platform_config")
+	c.Fields.Add(
+		&core.TextField{Name: "post_fee_usd", Max: 20},
+		&core.TextField{Name: "comment_fee_usd", Max: 20},
+		&core.NumberField{Name: "free_comments_per_day"},
+		&core.TextField{Name: "starter_balance_usd", Max: 20},
+	)
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create platform_config collection: %w", err)
+	}
+	app.Logger().Info("Created platform_config collection")
+
+	// Seed defaults
+	record := core.NewRecord(c)
+	record.Set("post_fee_usd", "0.02")
+	record.Set("comment_fee_usd", "0.005")
+	record.Set("free_comments_per_day", 10)
+	record.Set("starter_balance_usd", "0.50")
+	if err := app.Save(record); err != nil {
+		app.Logger().Warn("Failed to seed platform_config defaults", "error", err)
+	}
+
 	return nil
 }
 

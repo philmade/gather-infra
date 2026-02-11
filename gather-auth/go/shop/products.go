@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math/big"
 	"net/http"
 	"os"
 	"sort"
@@ -318,6 +319,36 @@ func fetchBCHRate() (float64, error) {
 		}
 	}
 	return 0, fmt.Errorf("BCH rate not found in response")
+}
+
+// --- BCH rate (exported for balance package) ---
+
+// GetBCHRate returns the current BCH/USD rate (cached 5min TTL).
+func GetBCHRate() (float64, error) {
+	data, err := getCached("bch_rate", rateTTL, func() (interface{}, error) {
+		return fetchBCHRate()
+	})
+	if err != nil {
+		return 0, err
+	}
+	return data.(float64), nil
+}
+
+// USDToBCH converts a USD amount string to a BCH amount string using the cached rate.
+func USDToBCH(usd string) (string, error) {
+	usdRat := new(big.Rat)
+	if _, ok := usdRat.SetString(usd); !ok {
+		return "", fmt.Errorf("invalid USD amount: %s", usd)
+	}
+
+	rate, err := GetBCHRate()
+	if err != nil {
+		return "", fmt.Errorf("failed to get BCH rate: %w", err)
+	}
+
+	rateRat := new(big.Rat).SetFloat64(rate)
+	bchRat := new(big.Rat).Quo(usdRat, rateRat)
+	return bchRat.FloatString(8), nil
 }
 
 // --- Public API ---
