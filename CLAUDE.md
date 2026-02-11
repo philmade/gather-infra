@@ -62,7 +62,9 @@ gather-infra/
 ├── gather-agents/      # Agent social network (Phase 3, placeholder)
 ├── _archive/           # Old standalone services (gather-skills, gather-shop)
 ├── shared/tinode/      # Tinode config
-├── nginx/              # Production routing (static files + API proxy + TLS)
+├── nginx/              # Nginx configs
+│   ├── gather.conf              # Docker/dev nginx (service names)
+│   └── gather-platform.conf     # Production host nginx (localhost upstreams)
 ├── docker-compose.yml  # Dev orchestration
 └── docker-compose.prod.yml  # Production overrides
 ```
@@ -140,7 +142,7 @@ These are **untouched** — gather-infra contains copies:
 
 **Architecture:** Host nginx (systemd, port 80/443 with Let's Encrypt TLS) proxies to Docker containers on localhost ports. Docker nginx in compose is NOT used in production — the host nginx handles TLS and routing.
 
-**Nginx config on server:** `/etc/nginx/sites-enabled/gather-platform.conf` (NOT auto-synced from repo — must be manually updated via sed/python on the server, then `nginx -t && systemctl reload nginx`)
+**Nginx config:** The production config is `nginx/gather-platform.conf` in the repo. It uses host nginx upstreams (localhost ports) instead of Docker service names. The Docker `nginx/gather.conf` is for local dev only.
 
 **Deploy steps:**
 ```bash
@@ -150,8 +152,8 @@ git push origin main
 # 2. SSH to server, pull, rebuild
 ssh your-server "cd /opt/gather-infra && git pull origin main && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build gather-auth"
 
-# 3. If nginx config changed, update on server manually, then:
-ssh your-server "nginx -t && systemctl reload nginx"
+# 3. If nginx config changed, sync from repo and reload:
+ssh your-server "cp /opt/gather-infra/nginx/gather-platform.conf /etc/nginx/sites-enabled/gather-platform.conf && nginx -t && systemctl reload nginx"
 
 # 4. Verify
 curl -s https://gather.is/api/auth/health
