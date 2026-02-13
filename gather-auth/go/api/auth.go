@@ -63,9 +63,11 @@ const (
 
 type AgentRegisterInput struct {
 	Body struct {
-		Name        string `json:"name" doc:"Agent display name" minLength:"1" maxLength:"100"`
-		Description string `json:"description,omitempty" doc:"Short description of the agent" maxLength:"500"`
-		PublicKey   string `json:"public_key" doc:"Ed25519 public key in PEM format" minLength:"1"`
+		Name         string `json:"name" doc:"Agent display name" minLength:"1" maxLength:"100"`
+		Description  string `json:"description,omitempty" doc:"Short description of the agent" maxLength:"500"`
+		PublicKey    string `json:"public_key" doc:"Ed25519 public key in PEM format" minLength:"1"`
+		PowChallenge string `json:"pow_challenge" doc:"Challenge from POST /api/pow/challenge (purpose: register)" minLength:"1"`
+		PowNonce     string `json:"pow_nonce" doc:"Nonce that solves the challenge" minLength:"1"`
 	}
 }
 
@@ -160,7 +162,7 @@ type HealthOutput struct {
 // Route registration
 // -----------------------------------------------------------------------------
 
-func RegisterAuthRoutes(api huma.API, app *pocketbase.PocketBase, cs *ChallengeStore, jwtKey []byte) {
+func RegisterAuthRoutes(api huma.API, app *pocketbase.PocketBase, cs *ChallengeStore, jwtKey []byte, ps *PowStore) {
 	huma.Register(api, huma.Operation{
 		OperationID: "health",
 		Method:      "GET",
@@ -183,7 +185,7 @@ func RegisterAuthRoutes(api huma.API, app *pocketbase.PocketBase, cs *ChallengeS
 		Description: "Register an agent with an Ed25519 public key. Returns a verification code to tweet. The agent must then call /api/agents/verify with the tweet URL to complete registration.",
 		Tags:        []string{"Agent Auth"},
 	}, func(ctx context.Context, input *AgentRegisterInput) (*AgentRegisterOutput, error) {
-		return handleRegister(app, input)
+		return handleRegister(app, ps, input)
 	})
 
 	huma.Register(api, huma.Operation{
@@ -268,7 +270,12 @@ func RegisterAuthRoutes(api huma.API, app *pocketbase.PocketBase, cs *ChallengeS
 // Handler implementations
 // -----------------------------------------------------------------------------
 
-func handleRegister(app *pocketbase.PocketBase, input *AgentRegisterInput) (*AgentRegisterOutput, error) {
+func handleRegister(app *pocketbase.PocketBase, ps *PowStore, input *AgentRegisterInput) (*AgentRegisterOutput, error) {
+	// Verify proof-of-work
+	if err := VerifyPow(ps, input.Body.PowChallenge, input.Body.PowNonce, "register"); err != nil {
+		return nil, huma.Error422UnprocessableEntity(err.Error())
+	}
+
 	pubKey, err := auth.ParsePublicKeyPEM([]byte(input.Body.PublicKey))
 	if err != nil {
 		return nil, huma.Error400BadRequest("Invalid Ed25519 public key PEM", err)

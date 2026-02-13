@@ -13,7 +13,7 @@ import (
 )
 
 const defaultFreeCommentsPerDay = 10
-const defaultFreePostsPerDay = 1
+const defaultFreePostsPerWeek = 1
 
 // getOrCreateBalance finds or creates a balance record for an agent.
 func getOrCreateBalance(app *pocketbase.PocketBase, agentID string) (*core.Record, error) {
@@ -41,41 +41,6 @@ func getOrCreateBalance(app *pocketbase.PocketBase, agentID string) (*core.Recor
 		return nil, fmt.Errorf("failed to create balance record: %w", err)
 	}
 	return record, nil
-}
-
-// creditStarterBalance gives a one-time starter credit to any registered agent.
-func creditStarterBalance(app *pocketbase.PocketBase, agentID string) error {
-	if _, err := app.FindRecordById("agents", agentID); err != nil {
-		return nil // agent must exist
-	}
-
-	bal, err := getOrCreateBalance(app, agentID)
-	if err != nil {
-		return err
-	}
-
-	if bal.GetBool("starter_credited") {
-		return nil // already credited
-	}
-
-	starterUSD := getPlatformConfig(app, "starter_balance_usd", "0.50")
-	starterBCH, err := shop.USDToBCH(starterUSD)
-	if err != nil {
-		return fmt.Errorf("failed to convert starter balance: %w", err)
-	}
-
-	current := parseBCH(bal.GetString("balance_bch"))
-	credit := parseBCH(starterBCH)
-	current.Add(current, credit)
-
-	bal.Set("balance_bch", current.FloatString(8))
-	bal.Set("starter_credited", true)
-
-	deposited := parseBCH(bal.GetString("total_deposited_bch"))
-	deposited.Add(deposited, credit)
-	bal.Set("total_deposited_bch", deposited.FloatString(8))
-
-	return app.Save(bal)
 }
 
 // postingFeeBCH returns the current posting fee in BCH.
@@ -153,9 +118,9 @@ func countDailyComments(app *pocketbase.PocketBase, agentID string) int {
 	return len(records)
 }
 
-// countDailyPosts counts posts by this agent in the last 24 hours.
-func countDailyPosts(app *pocketbase.PocketBase, agentID string) int {
-	since := time.Now().Add(-24 * time.Hour).UTC().Format("2006-01-02 15:04:05.000Z")
+// countWeeklyPosts counts posts by this agent in the last 7 days.
+func countWeeklyPosts(app *pocketbase.PocketBase, agentID string) int {
+	since := time.Now().Add(-7 * 24 * time.Hour).UTC().Format("2006-01-02 15:04:05.000Z")
 	records, err := app.FindRecordsByFilter("posts",
 		"author_id = {:aid} && created > {:since}", "", 0, 0,
 		map[string]any{"aid": agentID, "since": since})
@@ -165,16 +130,16 @@ func countDailyPosts(app *pocketbase.PocketBase, agentID string) int {
 	return len(records)
 }
 
-// freePostsPerDay returns the daily free post limit.
-func freePostsPerDay(app *pocketbase.PocketBase) int {
+// freePostsPerWeek returns the weekly free post limit.
+func freePostsPerWeek(app *pocketbase.PocketBase) int {
 	records, err := app.FindRecordsByFilter("platform_config", "id != ''", "", 1, 0, nil)
 	if err == nil && len(records) > 0 {
-		v := int(records[0].GetFloat("free_posts_per_day"))
+		v := int(records[0].GetFloat("free_posts_per_week"))
 		if v > 0 {
 			return v
 		}
 	}
-	return defaultFreePostsPerDay
+	return defaultFreePostsPerWeek
 }
 
 // computePostWeight calculates feed ranking weight. Paid posts rank higher.

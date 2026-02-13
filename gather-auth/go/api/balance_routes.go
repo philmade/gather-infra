@@ -23,7 +23,7 @@ type BalanceOutput struct {
 		PostingFeeBCH         string `json:"posting_fee_bch"`
 		CommentFeeBCH         string `json:"comment_fee_bch"`
 		FreeCommentsRemaining int    `json:"free_comments_remaining"`
-		FreePostsRemaining    int    `json:"free_posts_remaining"`
+		FreePostsRemaining    int    `json:"free_posts_remaining_this_week"`
 		Suspended             bool   `json:"suspended"`
 	}
 }
@@ -51,11 +51,10 @@ type FeesOutput struct {
 	Body struct {
 		PostFeeUSD       string `json:"post_fee_usd"`
 		PostFeeBCH       string `json:"post_fee_bch"`
-		PostFreeDaily    int    `json:"post_free_daily"`
+		PostFreeWeekly   int    `json:"post_free_weekly"`
 		CommentFreeDaily int    `json:"comment_free_daily"`
 		CommentFeeUSD    string `json:"comment_fee_usd"`
 		CommentFeeBCH    string `json:"comment_fee_bch"`
-		StarterBalUSD    string `json:"starter_balance_usd"`
 		DepositAddress   string `json:"deposit_address"`
 	}
 }
@@ -85,14 +84,6 @@ func RegisterBalanceRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []by
 			return nil, huma.Error500InternalServerError("Failed to check balance")
 		}
 
-		// Credit starter balance on first check
-		if !bal.GetBool("starter_credited") {
-			if err := creditStarterBalance(app, claims.AgentID); err == nil {
-				// Re-read after credit
-				bal, _ = getOrCreateBalance(app, claims.AgentID)
-			}
-		}
-
 		dailyUsed := countDailyComments(app, claims.AgentID)
 		freeLimit := freeCommentsPerDay(app)
 		remaining := freeLimit - dailyUsed
@@ -100,9 +91,9 @@ func RegisterBalanceRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []by
 			remaining = 0
 		}
 
-		dailyPostsUsed := countDailyPosts(app, claims.AgentID)
-		freePostLimit := freePostsPerDay(app)
-		postsRemaining := freePostLimit - dailyPostsUsed
+		weeklyPostsUsed := countWeeklyPosts(app, claims.AgentID)
+		freePostLimit := freePostsPerWeek(app)
+		postsRemaining := freePostLimit - weeklyPostsUsed
 		if postsRemaining < 0 {
 			postsRemaining = 0
 		}
@@ -207,16 +198,14 @@ func RegisterBalanceRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []by
 	}, func(ctx context.Context, input *struct{}) (*FeesOutput, error) {
 		postUSD := getPlatformConfig(app, "post_fee_usd", "0.02")
 		commentUSD := getPlatformConfig(app, "comment_fee_usd", "0.005")
-		starterUSD := getPlatformConfig(app, "starter_balance_usd", "0.50")
 
 		out := &FeesOutput{}
 		out.Body.PostFeeUSD = postUSD
 		out.Body.PostFeeBCH = postingFeeBCH(app)
-		out.Body.PostFreeDaily = freePostsPerDay(app)
+		out.Body.PostFreeWeekly = freePostsPerWeek(app)
 		out.Body.CommentFreeDaily = freeCommentsPerDay(app)
 		out.Body.CommentFeeUSD = commentUSD
 		out.Body.CommentFeeBCH = commentFeeBCH(app)
-		out.Body.StarterBalUSD = starterUSD
 		out.Body.DepositAddress = shop.ShopBCHAddress()
 		return out, nil
 	})

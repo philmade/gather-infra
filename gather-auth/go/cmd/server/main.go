@@ -29,6 +29,7 @@ func main() {
 	app := pocketbase.New()
 
 	challenges := gatherapi.NewChallengeStore()
+	powStore := gatherapi.NewPowStore()
 
 	jwtKey := []byte(os.Getenv("JWT_SIGNING_KEY"))
 	if len(jwtKey) == 0 {
@@ -84,7 +85,7 @@ func main() {
 
 		api.UseMiddleware(ratelimit.IPRateLimitMiddleware)
 
-		gatherapi.RegisterAuthRoutes(api, app, challenges, jwtKey)
+		gatherapi.RegisterAuthRoutes(api, app, challenges, jwtKey, powStore)
 		gatherapi.RegisterShopRoutes(api, app, jwtKey)
 		gatherapi.RegisterSkillRoutes(api, app, jwtKey)
 		gatherapi.RegisterReviewRoutes(api, app, jwtKey)
@@ -93,7 +94,8 @@ func main() {
 		gatherapi.RegisterHelpRoutes(api)
 		gatherapi.RegisterDiscoverRoutes(api)
 		gatherapi.RegisterInboxRoutes(api, app, jwtKey)
-		gatherapi.RegisterPostRoutes(api, app, jwtKey)
+		gatherapi.RegisterPowRoutes(api, app, powStore)
+		gatherapi.RegisterPostRoutes(api, app, jwtKey, powStore)
 		gatherapi.RegisterBalanceRoutes(api, app, jwtKey)
 		gatherapi.RegisterAdminRoutes(api, app)
 
@@ -126,6 +128,7 @@ func main() {
 			"/api/posts/{path...}",
 			"/api/posts",
 			"/api/tags",
+			"/api/pow/{path...}",
 			"/api/balance",
 			"/api/balance/{path...}",
 			"/api/admin/{path...}",
@@ -766,18 +769,33 @@ func ensureDepositsCollection(app *pocketbase.PocketBase) error {
 func ensurePlatformConfigCollection(app *pocketbase.PocketBase) error {
 	c, err := app.FindCollectionByNameOrId("platform_config")
 	if err == nil {
-		// Migration: add free_posts_per_day field
-		if c.Fields.GetByName("free_posts_per_day") == nil {
-			c.Fields.Add(&core.NumberField{Name: "free_posts_per_day"})
+		changed := false
+		// Migration: add free_posts_per_week field
+		if c.Fields.GetByName("free_posts_per_week") == nil {
+			c.Fields.Add(&core.NumberField{Name: "free_posts_per_week"})
+			changed = true
+		}
+		// Migration: add PoW difficulty fields
+		if c.Fields.GetByName("pow_difficulty_register") == nil {
+			c.Fields.Add(&core.NumberField{Name: "pow_difficulty_register"})
+			changed = true
+		}
+		if c.Fields.GetByName("pow_difficulty_post") == nil {
+			c.Fields.Add(&core.NumberField{Name: "pow_difficulty_post"})
+			changed = true
+		}
+		if changed {
 			if err := app.Save(c); err != nil {
-				return fmt.Errorf("migrate platform_config (add free_posts_per_day): %w", err)
+				return fmt.Errorf("migrate platform_config: %w", err)
 			}
-			// Seed default value in existing record
+			// Seed defaults in existing record
 			if records, err := app.FindRecordsByFilter("platform_config", "id != ''", "", 1, 0, nil); err == nil && len(records) > 0 {
-				records[0].Set("free_posts_per_day", 1)
+				records[0].Set("free_posts_per_week", 1)
+				records[0].Set("pow_difficulty_register", 22)
+				records[0].Set("pow_difficulty_post", 20)
 				app.Save(records[0])
 			}
-			app.Logger().Info("Added free_posts_per_day to platform_config")
+			app.Logger().Info("Migrated platform_config (free_posts_per_week, PoW difficulty)")
 		}
 		return nil
 	}
@@ -787,8 +805,9 @@ func ensurePlatformConfigCollection(app *pocketbase.PocketBase) error {
 		&core.TextField{Name: "post_fee_usd", Max: 20},
 		&core.TextField{Name: "comment_fee_usd", Max: 20},
 		&core.NumberField{Name: "free_comments_per_day"},
-		&core.NumberField{Name: "free_posts_per_day"},
-		&core.TextField{Name: "starter_balance_usd", Max: 20},
+		&core.NumberField{Name: "free_posts_per_week"},
+		&core.NumberField{Name: "pow_difficulty_register"},
+		&core.NumberField{Name: "pow_difficulty_post"},
 	)
 
 	if err := app.Save(c); err != nil {
@@ -801,8 +820,9 @@ func ensurePlatformConfigCollection(app *pocketbase.PocketBase) error {
 	record.Set("post_fee_usd", "0.02")
 	record.Set("comment_fee_usd", "0.005")
 	record.Set("free_comments_per_day", 10)
-	record.Set("free_posts_per_day", 1)
-	record.Set("starter_balance_usd", "0.50")
+	record.Set("free_posts_per_week", 1)
+	record.Set("pow_difficulty_register", 22)
+	record.Set("pow_difficulty_post", 20)
 	if err := app.Save(record); err != nil {
 		app.Logger().Warn("Failed to seed platform_config defaults", "error", err)
 	}

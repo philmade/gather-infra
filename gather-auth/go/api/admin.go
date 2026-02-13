@@ -46,20 +46,24 @@ type AdminAuthHeader struct {
 type UpdateFeesInput struct {
 	AdminAuthHeader
 	Body struct {
-		PostFeeUSD      string `json:"post_fee_usd,omitempty" doc:"Post fee in USD (e.g. 0.05)"`
-		CommentFeeUSD   string `json:"comment_fee_usd,omitempty" doc:"Comment fee in USD (e.g. 0.01)"`
-		FreeCommentsDay *int   `json:"free_comments_per_day,omitempty" doc:"Free daily comments per agent"`
-		StarterBalUSD   string `json:"starter_balance_usd,omitempty" doc:"Starter balance for verified agents"`
+		PostFeeUSD         string `json:"post_fee_usd,omitempty" doc:"Post fee in USD (e.g. 0.05)"`
+		CommentFeeUSD      string `json:"comment_fee_usd,omitempty" doc:"Comment fee in USD (e.g. 0.01)"`
+		FreeCommentsDay    *int   `json:"free_comments_per_day,omitempty" doc:"Free daily comments per agent"`
+		FreePostsWeek      *int   `json:"free_posts_per_week,omitempty" doc:"Free weekly posts per agent"`
+		PowDiffRegister    *int   `json:"pow_difficulty_register,omitempty" doc:"PoW difficulty for registration (leading zero bits)"`
+		PowDiffPost        *int   `json:"pow_difficulty_post,omitempty" doc:"PoW difficulty for posting (leading zero bits)"`
 	}
 }
 
 type UpdateFeesOutput struct {
 	Body struct {
-		PostFeeUSD      string `json:"post_fee_usd"`
-		CommentFeeUSD   string `json:"comment_fee_usd"`
-		FreeCommentsDay int    `json:"free_comments_per_day"`
-		StarterBalUSD   string `json:"starter_balance_usd"`
-		Message         string `json:"message"`
+		PostFeeUSD         string `json:"post_fee_usd"`
+		CommentFeeUSD      string `json:"comment_fee_usd"`
+		FreeCommentsDay    int    `json:"free_comments_per_day"`
+		FreePostsWeek      int    `json:"free_posts_per_week"`
+		PowDiffRegister    int    `json:"pow_difficulty_register"`
+		PowDiffPost        int    `json:"pow_difficulty_post"`
+		Message            string `json:"message"`
 	}
 }
 
@@ -150,8 +154,14 @@ func RegisterAdminRoutes(api huma.API, app *pocketbase.PocketBase) {
 		if input.Body.FreeCommentsDay != nil {
 			cfg.Set("free_comments_per_day", *input.Body.FreeCommentsDay)
 		}
-		if input.Body.StarterBalUSD != "" {
-			cfg.Set("starter_balance_usd", input.Body.StarterBalUSD)
+		if input.Body.FreePostsWeek != nil {
+			cfg.Set("free_posts_per_week", *input.Body.FreePostsWeek)
+		}
+		if input.Body.PowDiffRegister != nil {
+			cfg.Set("pow_difficulty_register", *input.Body.PowDiffRegister)
+		}
+		if input.Body.PowDiffPost != nil {
+			cfg.Set("pow_difficulty_post", *input.Body.PowDiffPost)
 		}
 
 		if err := app.Save(cfg); err != nil {
@@ -162,8 +172,10 @@ func RegisterAdminRoutes(api huma.API, app *pocketbase.PocketBase) {
 		out.Body.PostFeeUSD = cfg.GetString("post_fee_usd")
 		out.Body.CommentFeeUSD = cfg.GetString("comment_fee_usd")
 		out.Body.FreeCommentsDay = int(cfg.GetFloat("free_comments_per_day"))
-		out.Body.StarterBalUSD = cfg.GetString("starter_balance_usd")
-		out.Body.Message = "Fee schedule updated. Changes take effect immediately."
+		out.Body.FreePostsWeek = int(cfg.GetFloat("free_posts_per_week"))
+		out.Body.PowDiffRegister = int(cfg.GetFloat("pow_difficulty_register"))
+		out.Body.PowDiffPost = int(cfg.GetFloat("pow_difficulty_post"))
+		out.Body.Message = "Config updated. Changes take effect immediately."
 		return out, nil
 	})
 

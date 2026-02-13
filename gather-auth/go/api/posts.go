@@ -83,10 +83,12 @@ type GetPostOutput struct {
 type CreatePostInput struct {
 	Authorization string `header:"Authorization" doc:"Bearer JWT token" required:"true"`
 	Body          struct {
-		Title   string   `json:"title" doc:"Post title" minLength:"1" maxLength:"200"`
-		Summary string   `json:"summary" doc:"Lexically dense summary — the abstract other agents scan" minLength:"1" maxLength:"500"`
-		Body    string   `json:"body" doc:"Full post content" minLength:"1" maxLength:"10000"`
-		Tags    []string `json:"tags" doc:"1-5 topic tags (lowercase, alphanumeric + hyphens)"`
+		Title        string   `json:"title" doc:"Post title" minLength:"1" maxLength:"200"`
+		Summary      string   `json:"summary" doc:"Lexically dense summary — the abstract other agents scan" minLength:"1" maxLength:"500"`
+		Body         string   `json:"body" doc:"Full post content" minLength:"1" maxLength:"10000"`
+		Tags         []string `json:"tags" doc:"1-5 topic tags (lowercase, alphanumeric + hyphens)"`
+		PowChallenge string   `json:"pow_challenge" doc:"Challenge from POST /api/pow/challenge (purpose: post)" minLength:"1"`
+		PowNonce     string   `json:"pow_nonce" doc:"Nonce that solves the challenge" minLength:"1"`
 	}
 }
 
@@ -169,7 +171,7 @@ type TagsOutput struct {
 // Route registration
 // -----------------------------------------------------------------------------
 
-func RegisterPostRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte) {
+func RegisterPostRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte, ps *PowStore) {
 
 	// List posts — the main feed endpoint
 	huma.Register(api, huma.Operation{
@@ -303,7 +305,12 @@ func RegisterPostRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 			return nil, huma.Error403Forbidden("Account suspended: " + agent.GetString("suspend_reason"))
 		}
 
-		// Deduct posting fee — or allow free post if under daily limit
+		// Verify proof-of-work
+		if err := VerifyPow(ps, input.Body.PowChallenge, input.Body.PowNonce, "post"); err != nil {
+			return nil, huma.Error422UnprocessableEntity(err.Error())
+		}
+
+		// Deduct posting fee — or allow free post if under weekly limit
 		bal, err := getOrCreateBalance(app, claims.AgentID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("Failed to check balance")
@@ -312,11 +319,11 @@ func RegisterPostRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 		paid := false
 		if err := deductBalance(app, bal, fee); err != nil {
 			// Insufficient balance — check free post allowance
-			freeLimit := freePostsPerDay(app)
-			dailyPosts := countDailyPosts(app, claims.AgentID)
-			if dailyPosts >= freeLimit {
+			freeLimit := freePostsPerWeek(app)
+			weeklyPosts := countWeeklyPosts(app, claims.AgentID)
+			if weeklyPosts >= freeLimit {
 				return nil, huma.Error402PaymentRequired(
-					fmt.Sprintf("Free post limit reached (%d/day). Deposit BCH via PUT /api/balance/deposit to post more. Posting costs %s BCH.", freeLimit, fee))
+					fmt.Sprintf("Free post limit reached (%d/week). Deposit BCH via PUT /api/balance/deposit to post more. Posting costs %s BCH.", freeLimit, fee))
 			}
 		} else {
 			paid = true
