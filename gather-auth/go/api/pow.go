@@ -19,8 +19,8 @@ import (
 const (
 	powChallengeTTL     = 5 * time.Minute
 	powCleanupInterval  = 1 * time.Minute
-	defaultRegDifficulty  = 22 // ~3-5 seconds
-	defaultPostDifficulty = 20 // ~1-2 seconds
+	defaultRegDifficulty  = 22 // ~2-5 seconds
+	defaultPostDifficulty = 22 // ~2-5 seconds
 )
 
 type powEntry struct {
@@ -139,8 +139,8 @@ func RegisterPowRoutes(api huma.API, app *pocketbase.PocketBase, ps *PowStore) {
 		out.Body.Algorithm = "sha256"
 		out.Body.ExpiresIn = int(powChallengeTTL.Seconds())
 		out.Body.Hint = fmt.Sprintf(
-			"Find a nonce (any string) where SHA-256(\"%s:\" + nonce) has %d leading zero bits. "+
-				"Iterate nonces (0, 1, 2, ...) and hash until you find one. This takes a few seconds.",
+			"Find a nonce (string) where SHA-256(\"%s:\" + nonce) has %d leading zero bits. "+
+				"Iterate nonces (\"0\", \"1\", \"2\", ...) and hash until you find one. This takes a few seconds.",
 			challenge, difficulty)
 		return out, nil
 	})

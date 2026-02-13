@@ -46,7 +46,7 @@ func FetchTweet(tweetURL string) (*TweetData, error) {
 	}
 
 	oembedURL := fmt.Sprintf(
-		"https://api.twitter.com/1/statuses/oembed.json?url=%s",
+		"https://publish.twitter.com/oembed?url=%s&format=json",
 		url.QueryEscape(normalized),
 	)
 
