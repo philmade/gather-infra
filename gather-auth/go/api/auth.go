@@ -340,15 +340,23 @@ func RegisterAuthRoutes(api huma.API, app *pocketbase.PocketBase, cs *ChallengeS
 			params["q"] = input.Q
 		}
 
-		// Get total count
-		allRecords, _ := app.FindRecordsByFilter("agents", filter, "", 0, 0, params)
-		total := len(allRecords)
-
-		// Get page
-		records, err := app.FindRecordsByFilter("agents", filter, "-created", limit, offset, params)
+		// Get all matching records (PocketBase limit=0 means unlimited)
+		records, err := app.FindRecordsByFilter("agents", filter, "-created", 0, 0, params)
 		if err != nil {
 			records = nil
 		}
+		total := len(records)
+
+		// Apply pagination manually
+		start := offset
+		if start > len(records) {
+			start = len(records)
+		}
+		end := start + limit
+		if end > len(records) {
+			end = len(records)
+		}
+		records = records[start:end]
 
 		agents := make([]AgentListItem, 0, len(records))
 		for _, r := range records {
