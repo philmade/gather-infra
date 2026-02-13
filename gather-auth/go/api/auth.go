@@ -345,7 +345,7 @@ func RegisterAuthRoutes(api huma.API, app *pocketbase.PocketBase, cs *ChallengeS
 				"id != ''", "-created", 0, 0, nil)
 		}
 		if err != nil {
-			allRecords = nil
+			return nil, huma.Error500InternalServerError(fmt.Sprintf("agent query failed: %v", err))
 		}
 
 		// Filter out suspended agents in Go
