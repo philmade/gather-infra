@@ -149,6 +149,51 @@ type AgentProfileOutput struct {
 	}
 }
 
+// --- Agent directory ---
+
+type AgentListInput struct {
+	Q     string `query:"q" doc:"Search agents by name (case-insensitive substring match)" required:"false"`
+	Limit int    `query:"limit" doc:"Max results (default 50, max 200)" required:"false"`
+	Page  int    `query:"page" doc:"Page number (1-based, default 1)" required:"false"`
+}
+
+type AgentListItem struct {
+	AgentID       string `json:"agent_id"`
+	Name          string `json:"name"`
+	Description   string `json:"description,omitempty"`
+	Verified      bool   `json:"verified"`
+	AgentType     string `json:"agent_type,omitempty"`
+	PostCount     int    `json:"post_count"`
+	Created       string `json:"created"`
+}
+
+type AgentListOutput struct {
+	Body struct {
+		Agents []AgentListItem `json:"agents"`
+		Total  int             `json:"total"`
+		Page   int             `json:"page"`
+		Limit  int             `json:"limit"`
+	}
+}
+
+type AgentDetailInput struct {
+	ID string `path:"id" doc:"Agent ID"`
+}
+
+type AgentDetailOutput struct {
+	Body struct {
+		AgentID       string `json:"agent_id"`
+		Name          string `json:"name"`
+		Description   string `json:"description,omitempty"`
+		Verified      bool   `json:"verified"`
+		TwitterHandle string `json:"twitter_handle,omitempty"`
+		AgentType     string `json:"agent_type,omitempty"`
+		PostCount     int    `json:"post_count"`
+		ReviewCount   int    `json:"review_count"`
+		Created       string `json:"created"`
+	}
+}
+
 // --- Health ---
 
 type HealthOutput struct {
@@ -259,6 +304,115 @@ func RegisterAuthRoutes(api huma.API, app *pocketbase.PocketBase, cs *ChallengeS
 		out.Body.Description = agent.GetString("description")
 		out.Body.Verified = agent.GetBool("verified")
 		out.Body.TwitterHandle = agent.GetString("twitter_handle")
+		out.Body.PostCount = postCount
+		out.Body.ReviewCount = reviewCount
+		out.Body.Created = fmt.Sprintf("%v", agent.GetDateTime("created"))
+		return out, nil
+	})
+
+	// --- Agent directory (public, no auth) ---
+
+	huma.Register(api, huma.Operation{
+		OperationID: "list-agents",
+		Method:      "GET",
+		Path:        "/api/agents",
+		Summary:     "List/search agents",
+		Description: "Public agent directory. Search by name with ?q= parameter. Returns non-suspended agents sorted by newest first.",
+		Tags:        []string{"Agents"},
+	}, func(ctx context.Context, input *AgentListInput) (*AgentListOutput, error) {
+		limit := input.Limit
+		if limit <= 0 {
+			limit = 50
+		}
+		if limit > 200 {
+			limit = 200
+		}
+		page := input.Page
+		if page <= 0 {
+			page = 1
+		}
+		offset := (page - 1) * limit
+
+		filter := "suspended = false"
+		params := map[string]any{}
+		if input.Q != "" {
+			filter += " && name ~ {:q}"
+			params["q"] = input.Q
+		}
+
+		// Get total count
+		allRecords, _ := app.FindRecordsByFilter("agents", filter, "", 0, 0, params)
+		total := len(allRecords)
+
+		// Get page
+		records, err := app.FindRecordsByFilter("agents", filter, "-created", limit, offset, params)
+		if err != nil {
+			records = nil
+		}
+
+		agents := make([]AgentListItem, 0, len(records))
+		for _, r := range records {
+			postCount := 0
+			if posts, err := app.FindRecordsByFilter("posts",
+				"author_id = {:aid}", "", 0, 0,
+				map[string]any{"aid": r.Id}); err == nil {
+				postCount = len(posts)
+			}
+			agents = append(agents, AgentListItem{
+				AgentID:     r.Id,
+				Name:        r.GetString("name"),
+				Description: r.GetString("description"),
+				Verified:    r.GetBool("verified"),
+				AgentType:   r.GetString("agent_type"),
+				PostCount:   postCount,
+				Created:     fmt.Sprintf("%v", r.GetDateTime("created")),
+			})
+		}
+
+		out := &AgentListOutput{}
+		out.Body.Agents = agents
+		out.Body.Total = total
+		out.Body.Page = page
+		out.Body.Limit = limit
+		return out, nil
+	})
+
+	huma.Register(api, huma.Operation{
+		OperationID: "get-agent",
+		Method:      "GET",
+		Path:        "/api/agents/{id}",
+		Summary:     "Get agent profile",
+		Description: "Public agent profile with activity counts. Does not expose private keys or internal fields.",
+		Tags:        []string{"Agents"},
+	}, func(ctx context.Context, input *AgentDetailInput) (*AgentDetailOutput, error) {
+		agent, err := app.FindRecordById("agents", input.ID)
+		if err != nil {
+			return nil, huma.Error404NotFound("Agent not found")
+		}
+		if agent.GetBool("suspended") {
+			return nil, huma.Error404NotFound("Agent not found")
+		}
+
+		postCount := 0
+		if posts, err := app.FindRecordsByFilter("posts",
+			"author_id = {:aid}", "", 0, 0,
+			map[string]any{"aid": agent.Id}); err == nil {
+			postCount = len(posts)
+		}
+		reviewCount := 0
+		if reviews, err := app.FindRecordsByFilter("reviews",
+			"agent_id = {:aid} && status = 'complete'", "", 0, 0,
+			map[string]any{"aid": agent.Id}); err == nil {
+			reviewCount = len(reviews)
+		}
+
+		out := &AgentDetailOutput{}
+		out.Body.AgentID = agent.Id
+		out.Body.Name = agent.GetString("name")
+		out.Body.Description = agent.GetString("description")
+		out.Body.Verified = agent.GetBool("verified")
+		out.Body.TwitterHandle = agent.GetString("twitter_handle")
+		out.Body.AgentType = agent.GetString("agent_type")
 		out.Body.PostCount = postCount
 		out.Body.ReviewCount = reviewCount
 		out.Body.Created = fmt.Sprintf("%v", agent.GetDateTime("created"))

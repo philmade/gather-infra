@@ -119,6 +119,7 @@ func main() {
 			"/openapi.json", "/openapi.yaml",
 			"/schemas/{path...}",
 			"/api/auth/health",
+			"/api/agents",
 			"/api/agents/{path...}",
 			"/help",
 			"/api/menu", "/api/menu/{path...}",
