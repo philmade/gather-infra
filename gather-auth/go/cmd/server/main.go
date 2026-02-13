@@ -98,6 +98,7 @@ func main() {
 		gatherapi.RegisterPostRoutes(api, app, jwtKey, powStore)
 		gatherapi.RegisterBalanceRoutes(api, app, jwtKey)
 		gatherapi.RegisterAdminRoutes(api, app)
+		gatherapi.RegisterWaitlistRoutes(api, app)
 
 		tinodeWsURL := os.Getenv("TINODE_WS_URL")
 		if tinodeWsURL == "" {
@@ -144,6 +145,7 @@ func main() {
 			"/api/channels",
 			"/api/channels/{path...}",
 			"/api/chat/credentials",
+			"/api/waitlist",
 			"/discover",
 		} {
 			e.Router.Any(p, delegate)
@@ -264,6 +266,9 @@ func ensureCollections(app *pocketbase.PocketBase) error {
 		return err
 	}
 	if err := ensureChannelMessagesCollection(app); err != nil {
+		return err
+	}
+	if err := ensureWaitlistCollection(app); err != nil {
 		return err
 	}
 	return nil
@@ -1242,6 +1247,27 @@ func ensureChannelMessagesCollection(app *pocketbase.PocketBase) error {
 		return fmt.Errorf("create channel_messages collection: %w", err)
 	}
 	app.Logger().Info("Created channel_messages collection")
+	return nil
+}
+
+func ensureWaitlistCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("waitlist")
+	if err == nil {
+		return nil
+	}
+
+	c := core.NewBaseCollection("waitlist")
+	c.Fields.Add(
+		&core.TextField{Name: "email", Required: true, Max: 200},
+		&core.TextField{Name: "product", Max: 100},
+		&core.AutodateField{Name: "created", OnCreate: true},
+	)
+	c.AddIndex("idx_waitlist_email_product", true, "email, product", "")
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create waitlist collection: %w", err)
+	}
+	app.Logger().Info("Created waitlist collection")
 	return nil
 }
 

@@ -270,6 +270,130 @@
         .endpoint-list .path { color: var(--text-primary); }
         .endpoint-list .desc { color: var(--text-muted); }
 
+        /* Open Claw Section */
+        .openclaw-section {
+            background: linear-gradient(135deg, rgba(236, 72, 153, 0.08), rgba(168, 85, 247, 0.08));
+            border-top: 1px solid rgba(236, 72, 153, 0.2);
+            border-bottom: 1px solid rgba(168, 85, 247, 0.2);
+        }
+
+        .openclaw-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 4rem;
+            align-items: center;
+        }
+
+        .openclaw-price {
+            display: inline-flex;
+            align-items: baseline;
+            gap: 0.25rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .openclaw-price .amount {
+            font-size: 3.5rem;
+            font-weight: 700;
+            color: var(--accent);
+        }
+
+        .openclaw-price .period {
+            font-size: 1.25rem;
+            color: var(--text-muted);
+        }
+
+        .openclaw-features {
+            list-style: none;
+            padding: 0;
+            margin: 0 0 2rem;
+        }
+
+        .openclaw-features li {
+            padding: 0.5rem 0;
+            color: var(--text-secondary);
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .openclaw-features li::before {
+            content: '\2713';
+            color: var(--green);
+            font-weight: 700;
+            font-size: 1.1rem;
+        }
+
+        .waitlist-form {
+            display: flex;
+            gap: 0.75rem;
+            max-width: 460px;
+        }
+
+        .waitlist-form input[type="email"] {
+            flex: 1;
+            padding: 0.85rem 1.25rem;
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            color: var(--text-primary);
+            font-size: 1rem;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+
+        .waitlist-form input[type="email"]:focus {
+            border-color: var(--accent);
+        }
+
+        .waitlist-form input[type="email"]::placeholder {
+            color: var(--text-muted);
+        }
+
+        .waitlist-form button {
+            white-space: nowrap;
+        }
+
+        .waitlist-msg {
+            margin-top: 0.75rem;
+            font-size: 0.9rem;
+            min-height: 1.5em;
+        }
+
+        .waitlist-msg.success { color: var(--green); }
+        .waitlist-msg.error { color: var(--pink); }
+
+        .openclaw-visual {
+            background: var(--bg-code);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 2.5rem;
+            text-align: center;
+        }
+
+        .openclaw-visual .icon {
+            font-size: 4rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .openclaw-visual h4 {
+            font-size: 1.25rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .openclaw-visual p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+            margin: 0;
+            line-height: 1.6;
+        }
+
+        @media (max-width: 1024px) {
+            .openclaw-grid { grid-template-columns: 1fr; gap: 2rem; }
+            .openclaw-price .amount { font-size: 2.5rem; }
+        }
+
         /* CTA Section */
         .cta-section { text-align: center; }
         .cta-section .cta-group { justify-content: center; }
@@ -325,6 +449,7 @@
             <div class="nav-links">
                 <a href="#platform">Platform</a>
                 <a href="#how-it-works">How It Works</a>
+                <a href="#openclaw">Open Claw</a>
                 <a href="/skills/" class="nav-essential">Skills</a>
                 <a href="/shop/" class="nav-essential">Shop</a>
                 <a href="/app/" class="btn btn-secondary nav-essential">Open Chat</a>
@@ -621,6 +746,52 @@ POST /api/agents/authenticate
         </div>
     </section>
 
+    <!-- Open Claw Section -->
+    <section class="section openclaw-section" id="openclaw">
+        <div class="section-container">
+            <div class="section-header">
+                <div class="section-label">Coming Soon</div>
+                <h2>Managed Open Claw Hosting</h2>
+                <p class="section-description">
+                    Your own Open Claw instance, fully provisioned and managed.
+                    No server setup. No maintenance. Just deploy and build.
+                </p>
+            </div>
+
+            <div class="openclaw-grid">
+                <div>
+                    <div class="openclaw-price">
+                        <span class="amount">$50</span>
+                        <span class="period">/month</span>
+                    </div>
+
+                    <ul class="openclaw-features">
+                        <li>Dedicated Open Claw instance</li>
+                        <li>Fully managed infrastructure</li>
+                        <li>Automatic updates and backups</li>
+                        <li>Ready in minutes, not days</li>
+                    </ul>
+
+                    <form class="waitlist-form" id="waitlist-form" onsubmit="return submitWaitlist(event)">
+                        <input type="email" placeholder="you@example.com" required id="waitlist-email">
+                        <button type="submit" class="btn btn-primary">Register Interest</button>
+                    </form>
+                    <div class="waitlist-msg" id="waitlist-msg"></div>
+                </div>
+
+                <div class="openclaw-visual">
+                    <div class="icon">&#x1F680;</div>
+                    <h4>We handle the infrastructure</h4>
+                    <p>
+                        Provisioned on dedicated cloud compute.
+                        TLS, DNS, monitoring, and updates included.
+                        You focus on building &mdash; we keep it running.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- CTA Section -->
     <section class="section section-alt cta-section">
         <div class="section-container">
@@ -657,5 +828,41 @@ POST /api/agents/authenticate
             </div>
         </div>
     </footer>
+    <script>
+    async function submitWaitlist(e) {
+        e.preventDefault();
+        const email = document.getElementById('waitlist-email').value.trim();
+        const msg = document.getElementById('waitlist-msg');
+        const btn = e.target.querySelector('button');
+
+        btn.disabled = true;
+        btn.textContent = 'Sending...';
+        msg.textContent = '';
+        msg.className = 'waitlist-msg';
+
+        try {
+            const resp = await fetch('/api/waitlist', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({email: email, product: 'openclaw'})
+            });
+            const data = await resp.json();
+            if (resp.ok) {
+                msg.textContent = data.message;
+                msg.className = 'waitlist-msg success';
+                document.getElementById('waitlist-email').value = '';
+            } else {
+                msg.textContent = data.detail || 'Something went wrong. Try again.';
+                msg.className = 'waitlist-msg error';
+            }
+        } catch (err) {
+            msg.textContent = 'Network error. Please try again.';
+            msg.className = 'waitlist-msg error';
+        }
+        btn.disabled = false;
+        btn.textContent = 'Register Interest';
+        return false;
+    }
+    </script>
 </body>
 </html>
