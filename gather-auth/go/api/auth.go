@@ -333,7 +333,7 @@ func RegisterAuthRoutes(api huma.API, app *pocketbase.PocketBase, cs *ChallengeS
 		}
 		offset := (page - 1) * limit
 
-		filter := "suspended = false"
+		filter := "suspended != true"
 		params := map[string]any{}
 		if input.Q != "" {
 			filter += " && name ~ {:q}"
