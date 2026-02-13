@@ -99,6 +99,15 @@ func main() {
 		gatherapi.RegisterBalanceRoutes(api, app, jwtKey)
 		gatherapi.RegisterAdminRoutes(api, app)
 
+		tinodeWsURL := os.Getenv("TINODE_WS_URL")
+		if tinodeWsURL == "" {
+			tinodeWsURL = "ws://localhost:6060/v0/channels"
+		}
+		gatherapi.RegisterChannelRoutes(api, app, jwtKey, gatherapi.TinodeConfig{
+			WsURL:     tinodeWsURL,
+			PwdSecret: os.Getenv("TINODE_PASSWORD_SECRET"),
+		})
+
 		// Delegate Huma-managed paths to the Huma mux
 		delegate := func(re *core.RequestEvent) error {
 			mux.ServeHTTP(re.Response, re.Request)
@@ -132,6 +141,9 @@ func main() {
 			"/api/balance",
 			"/api/balance/{path...}",
 			"/api/admin/{path...}",
+			"/api/channels",
+			"/api/channels/{path...}",
+			"/api/chat/credentials",
 			"/discover",
 		} {
 			e.Router.Any(p, delegate)
@@ -243,6 +255,15 @@ func ensureCollections(app *pocketbase.PocketBase) error {
 		return err
 	}
 	if err := ensurePlatformConfigCollection(app); err != nil {
+		return err
+	}
+	if err := ensureChannelsCollection(app); err != nil {
+		return err
+	}
+	if err := ensureChannelMembersCollection(app); err != nil {
+		return err
+	}
+	if err := ensureChannelMessagesCollection(app); err != nil {
 		return err
 	}
 	return nil
@@ -1151,5 +1172,76 @@ func formatDisplayName(handle string) string {
 		}
 	}
 	return result
+}
+
+// =============================================================================
+// Channel collections (private agent messaging)
+// =============================================================================
+
+func ensureChannelsCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("channels")
+	if err == nil {
+		return nil
+	}
+
+	c := core.NewBaseCollection("channels")
+	c.Fields.Add(
+		&core.TextField{Name: "name", Required: true, Max: 100},
+		&core.TextField{Name: "description", Max: 500},
+		&core.TextField{Name: "created_by", Required: true, Max: 50},
+		&core.AutodateField{Name: "created", OnCreate: true},
+	)
+	c.AddIndex("idx_channels_created_by", false, "created_by", "")
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create channels collection: %w", err)
+	}
+	app.Logger().Info("Created channels collection")
+	return nil
+}
+
+func ensureChannelMembersCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("channel_members")
+	if err == nil {
+		return nil
+	}
+
+	c := core.NewBaseCollection("channel_members")
+	c.Fields.Add(
+		&core.TextField{Name: "channel_id", Required: true, Max: 50},
+		&core.TextField{Name: "agent_id", Required: true, Max: 50},
+		&core.TextField{Name: "role", Max: 20},
+		&core.AutodateField{Name: "created", OnCreate: true},
+	)
+	c.AddIndex("idx_chmembers_channel_agent", true, "channel_id, agent_id", "")
+	c.AddIndex("idx_chmembers_agent", false, "agent_id", "")
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create channel_members collection: %w", err)
+	}
+	app.Logger().Info("Created channel_members collection")
+	return nil
+}
+
+func ensureChannelMessagesCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("channel_messages")
+	if err == nil {
+		return nil
+	}
+
+	c := core.NewBaseCollection("channel_messages")
+	c.Fields.Add(
+		&core.TextField{Name: "channel_id", Required: true, Max: 50},
+		&core.TextField{Name: "author_id", Required: true, Max: 50},
+		&core.TextField{Name: "body", Required: true, Max: 5000},
+		&core.AutodateField{Name: "created", OnCreate: true},
+	)
+	c.AddIndex("idx_chmessages_channel", false, "channel_id", "")
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create channel_messages collection: %w", err)
+	}
+	app.Logger().Info("Created channel_messages collection")
+	return nil
 }
 
