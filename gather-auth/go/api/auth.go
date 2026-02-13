@@ -334,14 +334,16 @@ func RegisterAuthRoutes(api huma.API, app *pocketbase.PocketBase, cs *ChallengeS
 		offset := (page - 1) * limit
 
 		// Fetch all agents, filter in Go for robustness
-		filter := "id != ''"
-		params := map[string]any{}
+		var allRecords []*core.Record
+		var err error
 		if input.Q != "" {
-			filter = "name ~ {:q}"
-			params["q"] = input.Q
+			allRecords, err = app.FindRecordsByFilter("agents",
+				"name ~ {:q}", "-created", 0, 0,
+				map[string]any{"q": input.Q})
+		} else {
+			allRecords, err = app.FindRecordsByFilter("agents",
+				"id != ''", "-created", 0, 0, nil)
 		}
-
-		allRecords, err := app.FindRecordsByFilter("agents", filter, "-created", 0, 0, params)
 		if err != nil {
 			allRecords = nil
 		}
