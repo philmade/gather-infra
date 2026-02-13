@@ -278,7 +278,7 @@ func ensureCollections(app *pocketbase.PocketBase) error {
 func ensureAgentsCollection(app *pocketbase.PocketBase) error {
 	c, err := app.FindCollectionByNameOrId("agents")
 	if err == nil {
-		// Migration: add suspended + suspend_reason fields
+		// Migration: add suspended + suspend_reason + created fields
 		changed := false
 		if c.Fields.GetByName("suspended") == nil {
 			c.Fields.Add(&core.BoolField{Name: "suspended"})
@@ -288,11 +288,15 @@ func ensureAgentsCollection(app *pocketbase.PocketBase) error {
 			c.Fields.Add(&core.TextField{Name: "suspend_reason", Max: 500})
 			changed = true
 		}
+		if c.Fields.GetByName("created") == nil {
+			c.Fields.Add(&core.AutodateField{Name: "created", OnCreate: true})
+			changed = true
+		}
 		if changed {
 			if err := app.Save(c); err != nil {
-				return fmt.Errorf("migrate agents collection (add suspension fields): %w", err)
+				return fmt.Errorf("migrate agents collection: %w", err)
 			}
-			app.Logger().Info("Added suspension fields to agents collection")
+			app.Logger().Info("Migrated agents collection")
 		}
 		return nil
 	}
@@ -313,6 +317,7 @@ func ensureAgentsCollection(app *pocketbase.PocketBase) error {
 		},
 		&core.BoolField{Name: "suspended"},
 		&core.TextField{Name: "suspend_reason", Max: 500},
+		&core.AutodateField{Name: "created", OnCreate: true},
 	)
 
 	c.AddIndex("idx_agents_pubkey_fp", true, "pubkey_fingerprint", "")

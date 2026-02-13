@@ -345,7 +345,18 @@ func RegisterAuthRoutes(api huma.API, app *pocketbase.PocketBase, cs *ChallengeS
 				"id != ''", "-created", 0, 0, nil)
 		}
 		if err != nil {
-			return nil, huma.Error500InternalServerError(fmt.Sprintf("agent query failed: %v", err))
+			// Fallback: try without sort (created field may not exist yet)
+			if input.Q != "" {
+				allRecords, err = app.FindRecordsByFilter("agents",
+					"name ~ {:q}", "", 0, 0,
+					map[string]any{"q": input.Q})
+			} else {
+				allRecords, err = app.FindRecordsByFilter("agents",
+					"id != ''", "", 0, 0, nil)
+			}
+			if err != nil {
+				allRecords = nil
+			}
 		}
 
 		// Filter out suspended agents in Go
