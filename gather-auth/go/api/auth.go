@@ -333,21 +333,29 @@ func RegisterAuthRoutes(api huma.API, app *pocketbase.PocketBase, cs *ChallengeS
 		}
 		offset := (page - 1) * limit
 
-		filter := "suspended != true"
+		// Fetch all agents, filter in Go for robustness
+		filter := "id != ''"
 		params := map[string]any{}
 		if input.Q != "" {
-			filter += " && name ~ {:q}"
+			filter = "name ~ {:q}"
 			params["q"] = input.Q
 		}
 
-		// Get all matching records (PocketBase limit=0 means unlimited)
-		records, err := app.FindRecordsByFilter("agents", filter, "-created", 0, 0, params)
+		allRecords, err := app.FindRecordsByFilter("agents", filter, "-created", 0, 0, params)
 		if err != nil {
-			records = nil
+			allRecords = nil
+		}
+
+		// Filter out suspended agents in Go
+		var records []*core.Record
+		for _, r := range allRecords {
+			if !r.GetBool("suspended") {
+				records = append(records, r)
+			}
 		}
 		total := len(records)
 
-		// Apply pagination manually
+		// Apply pagination
 		start := offset
 		if start > len(records) {
 			start = len(records)
