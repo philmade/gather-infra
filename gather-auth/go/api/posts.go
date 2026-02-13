@@ -28,6 +28,7 @@ type PostItem struct {
 	AuthorID     string        `json:"author_id,omitempty"`
 	Verified     bool          `json:"verified"`
 	Score        int           `json:"score"`
+	Weight       int           `json:"weight"`
 	CommentCount int           `json:"comment_count"`
 	Tags         []string      `json:"tags"`
 	Created      string        `json:"created"`
@@ -207,7 +208,7 @@ func RegisterPostRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 			filter += " && " + strings.Join(filters, " && ")
 		}
 
-		sortOrder := "-score,-created"
+		sortOrder := "-weight,-score,-created"
 		if input.Sort == "newest" {
 			sortOrder = "-created"
 		}
@@ -244,7 +245,7 @@ func RegisterPostRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 	}, func(ctx context.Context, input *struct{}) (*DigestOutput, error) {
 		since := time.Now().Add(-24 * time.Hour).UTC().Format("2006-01-02 15:04:05.000Z")
 		records, _ := app.FindRecordsByFilter("posts",
-			"created > {:since}", "-score,-created", 10, 0,
+			"created > {:since}", "-weight,-score,-created", 10, 0,
 			map[string]any{"since": since})
 
 		cache := map[string]postAgentInfo{}
@@ -302,15 +303,23 @@ func RegisterPostRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 			return nil, huma.Error403Forbidden("Account suspended: " + agent.GetString("suspend_reason"))
 		}
 
-		// Deduct posting fee
+		// Deduct posting fee — or allow free post if under daily limit
 		bal, err := getOrCreateBalance(app, claims.AgentID)
 		if err != nil {
 			return nil, huma.Error500InternalServerError("Failed to check balance")
 		}
 		fee := postingFeeBCH(app)
+		paid := false
 		if err := deductBalance(app, bal, fee); err != nil {
-			return nil, huma.Error402PaymentRequired(
-				fmt.Sprintf("Insufficient balance. Posting costs %s BCH. Deposit BCH via PUT /api/balance/deposit. Check GET /api/balance for your current balance.", fee))
+			// Insufficient balance — check free post allowance
+			freeLimit := freePostsPerDay(app)
+			dailyPosts := countDailyPosts(app, claims.AgentID)
+			if dailyPosts >= freeLimit {
+				return nil, huma.Error402PaymentRequired(
+					fmt.Sprintf("Free post limit reached (%d/day). Deposit BCH via PUT /api/balance/deposit to post more. Posting costs %s BCH.", freeLimit, fee))
+			}
+		} else {
+			paid = true
 		}
 
 		if len(input.Body.Tags) == 0 || len(input.Body.Tags) > 5 {
@@ -340,6 +349,7 @@ func RegisterPostRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 		record.Set("tags", string(tagsJSON))
 		record.Set("score", 0)
 		record.Set("comment_count", 0)
+		record.Set("weight", computePostWeight(app, claims.AgentID, paid))
 
 		if err := app.Save(record); err != nil {
 			return nil, huma.Error500InternalServerError("Failed to create post")
@@ -614,6 +624,7 @@ func recordToPostItem(app *pocketbase.PocketBase, r *core.Record, includeBody, i
 		Author:       author.Name,
 		Verified:     author.Verified,
 		Score:        int(r.GetFloat("score")),
+		Weight:       int(r.GetFloat("weight")),
 		CommentCount: int(r.GetFloat("comment_count")),
 		Tags:         tags,
 		Created:      fmt.Sprintf("%v", r.GetDateTime("created")),

@@ -202,7 +202,7 @@ func RegisterAuthRoutes(api huma.API, app *pocketbase.PocketBase, cs *ChallengeS
 		Method:      "POST",
 		Path:        "/api/agents/challenge",
 		Summary:     "Request authentication challenge",
-		Description: "Request a nonce to sign for authentication. The agent must be registered and verified. Sign the returned nonce with your Ed25519 private key and submit to /api/agents/authenticate.",
+		Description: "Request a nonce to sign for authentication. The agent must be registered. Sign the returned nonce with your Ed25519 private key and submit to /api/agents/authenticate.",
 		Tags:        []string{"Agent Auth"},
 	}, func(ctx context.Context, input *ChallengeRequestInput) (*ChallengeRequestOutput, error) {
 		return handleChallenge(app, cs, input)

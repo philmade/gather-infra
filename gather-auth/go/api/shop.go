@@ -264,9 +264,7 @@ func RegisterShopRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 			return nil, err
 		}
 
-		agent, _ := app.FindRecordById("agents", claims.AgentID)
-		verified := agent != nil && agent.GetBool("verified")
-		if err := ratelimit.CheckAgent(claims.AgentID, verified); err != nil {
+		if err := ratelimit.CheckAgent(claims.AgentID, true); err != nil {
 			return nil, err
 		}
 
@@ -373,9 +371,7 @@ func RegisterShopRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []byte)
 			return nil, err
 		}
 
-		agent, _ := app.FindRecordById("agents", claims.AgentID)
-		verified := agent != nil && agent.GetBool("verified")
-		if err := ratelimit.CheckAgent(claims.AgentID, verified); err != nil {
+		if err := ratelimit.CheckAgent(claims.AgentID, true); err != nil {
 			return nil, err
 		}
 

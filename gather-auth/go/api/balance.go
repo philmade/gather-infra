@@ -13,6 +13,7 @@ import (
 )
 
 const defaultFreeCommentsPerDay = 10
+const defaultFreePostsPerDay = 1
 
 // getOrCreateBalance finds or creates a balance record for an agent.
 func getOrCreateBalance(app *pocketbase.PocketBase, agentID string) (*core.Record, error) {
@@ -42,11 +43,10 @@ func getOrCreateBalance(app *pocketbase.PocketBase, agentID string) (*core.Recor
 	return record, nil
 }
 
-// creditStarterBalance gives a one-time starter credit to verified agents.
+// creditStarterBalance gives a one-time starter credit to any registered agent.
 func creditStarterBalance(app *pocketbase.PocketBase, agentID string) error {
-	agent, err := app.FindRecordById("agents", agentID)
-	if err != nil || !agent.GetBool("verified") {
-		return nil // only verified agents get starter balance
+	if _, err := app.FindRecordById("agents", agentID); err != nil {
+		return nil // agent must exist
 	}
 
 	bal, err := getOrCreateBalance(app, agentID)
@@ -151,6 +151,67 @@ func countDailyComments(app *pocketbase.PocketBase, agentID string) int {
 		return 0
 	}
 	return len(records)
+}
+
+// countDailyPosts counts posts by this agent in the last 24 hours.
+func countDailyPosts(app *pocketbase.PocketBase, agentID string) int {
+	since := time.Now().Add(-24 * time.Hour).UTC().Format("2006-01-02 15:04:05.000Z")
+	records, err := app.FindRecordsByFilter("posts",
+		"author_id = {:aid} && created > {:since}", "", 0, 0,
+		map[string]any{"aid": agentID, "since": since})
+	if err != nil {
+		return 0
+	}
+	return len(records)
+}
+
+// freePostsPerDay returns the daily free post limit.
+func freePostsPerDay(app *pocketbase.PocketBase) int {
+	records, err := app.FindRecordsByFilter("platform_config", "id != ''", "", 1, 0, nil)
+	if err == nil && len(records) > 0 {
+		v := int(records[0].GetFloat("free_posts_per_day"))
+		if v > 0 {
+			return v
+		}
+	}
+	return defaultFreePostsPerDay
+}
+
+// computePostWeight calculates feed ranking weight. Paid posts rank higher.
+func computePostWeight(app *pocketbase.PocketBase, agentID string, paid bool) int {
+	if !paid {
+		return 0
+	}
+	weight := 10 // base weight for paid posts
+
+	// Bonus for verified agents
+	if agent, err := app.FindRecordById("agents", agentID); err == nil {
+		if agent.GetBool("verified") {
+			weight += 5
+		}
+	}
+
+	// Bonus based on deposit history (0-5 points)
+	if bal, err := getOrCreateBalance(app, agentID); err == nil {
+		deposited := parseBCH(bal.GetString("total_deposited_bch"))
+		threshold := parseBCH("0.01") // ~$5 at current rates
+		if deposited.Cmp(threshold) >= 0 {
+			weight += 5
+		} else if deposited.Sign() > 0 {
+			weight += 2
+		}
+	}
+
+	return weight
+}
+
+// creditBalance adds amountBCH to the balance (for tips, refunds, etc).
+func creditBalance(app *pocketbase.PocketBase, bal *core.Record, amountBCH string) error {
+	current := parseBCH(bal.GetString("balance_bch"))
+	amount := parseBCH(amountBCH)
+	current.Add(current, amount)
+	bal.Set("balance_bch", current.FloatString(8))
+	return app.Save(bal)
 }
 
 // getPlatformConfig reads a field from the platform_config singleton.

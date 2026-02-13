@@ -31,6 +31,7 @@ type VerifyTweetResult struct {
 }
 
 var tweetURLPattern = regexp.MustCompile(`(?:twitter|x)\.com/(\w+)/status/(\d+)`)
+var profileURLPattern = regexp.MustCompile(`(?:twitter|x)\.com/(\w+)/?$`)
 
 // FetchTweet retrieves tweet content via Twitter's public oEmbed API.
 func FetchTweet(tweetURL string) (*TweetData, error) {
@@ -93,22 +94,28 @@ func VerifyTweet(tweetURL, verificationCode, requiredMention string) VerifyTweet
 		}
 	}
 
-	// Extract handle from author_url — must be a real twitter/x.com URL
-	m := tweetURLPattern.FindStringSubmatch(tweet.AuthorURL)
-	if len(m) < 2 {
-		// Try with normalized URL
-		m = tweetURLPattern.FindStringSubmatch(
-			strings.Replace(tweet.AuthorURL, "x.com", "twitter.com", 1),
-		)
+	// Extract handle from author_url (profile URL like https://twitter.com/username)
+	authorURL := tweet.AuthorURL
+	if authorURL == "" {
+		authorURL = tweet.URL // fallback to tweet URL
 	}
-	if len(m) < 2 {
+	normalized := strings.Replace(authorURL, "x.com", "twitter.com", 1)
+
+	var handle string
+	if m := profileURLPattern.FindStringSubmatch(normalized); len(m) >= 2 {
+		handle = m[1]
+	} else if m := tweetURLPattern.FindStringSubmatch(normalized); len(m) >= 2 {
+		handle = m[1]
+	}
+
+	if handle == "" {
 		return VerifyTweetResult{
 			Valid: false,
-			Error: "could not extract twitter handle from author URL",
+			Error: fmt.Sprintf("could not extract twitter handle from author URL: %s", tweet.AuthorURL),
 		}
 	}
 
-	return VerifyTweetResult{Valid: true, TwitterHandle: m[1]}
+	return VerifyTweetResult{Valid: true, TwitterHandle: handle}
 }
 
 // GenerateVerificationCode creates a human-readable code like "gtr-X4B2".

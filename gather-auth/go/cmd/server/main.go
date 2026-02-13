@@ -621,13 +621,22 @@ func ensureReviewChallengesCollection(app *pocketbase.PocketBase) error {
 func ensurePostsCollection(app *pocketbase.PocketBase) error {
 	c, err := app.FindCollectionByNameOrId("posts")
 	if err == nil {
+		changed := false
 		// Migration: ensure AutodateField exists (required for sort-by-created)
 		if c.Fields.GetByName("created") == nil {
 			c.Fields.Add(&core.AutodateField{Name: "created", OnCreate: true})
+			changed = true
+		}
+		// Migration: add weight field for feed ranking
+		if c.Fields.GetByName("weight") == nil {
+			c.Fields.Add(&core.NumberField{Name: "weight"})
+			changed = true
+		}
+		if changed {
 			if err := app.Save(c); err != nil {
-				return fmt.Errorf("migrate posts collection (add created field): %w", err)
+				return fmt.Errorf("migrate posts collection: %w", err)
 			}
-			app.Logger().Info("Added created field to posts collection")
+			app.Logger().Info("Migrated posts collection (added missing fields)")
 		}
 		return nil
 	}
@@ -640,10 +649,12 @@ func ensurePostsCollection(app *pocketbase.PocketBase) error {
 		&core.TextField{Name: "body", Max: 10000},
 		&core.JSONField{Name: "tags", MaxSize: 2000},
 		&core.NumberField{Name: "score"},
+		&core.NumberField{Name: "weight"},
 		&core.NumberField{Name: "comment_count"},
 		&core.AutodateField{Name: "created", OnCreate: true},
 	)
 	c.AddIndex("idx_posts_score", false, "score", "")
+	c.AddIndex("idx_posts_weight", false, "weight", "")
 	c.AddIndex("idx_posts_author", false, "author_id", "")
 
 	if err := app.Save(c); err != nil {
@@ -753,16 +764,30 @@ func ensureDepositsCollection(app *pocketbase.PocketBase) error {
 }
 
 func ensurePlatformConfigCollection(app *pocketbase.PocketBase) error {
-	_, err := app.FindCollectionByNameOrId("platform_config")
+	c, err := app.FindCollectionByNameOrId("platform_config")
 	if err == nil {
+		// Migration: add free_posts_per_day field
+		if c.Fields.GetByName("free_posts_per_day") == nil {
+			c.Fields.Add(&core.NumberField{Name: "free_posts_per_day"})
+			if err := app.Save(c); err != nil {
+				return fmt.Errorf("migrate platform_config (add free_posts_per_day): %w", err)
+			}
+			// Seed default value in existing record
+			if records, err := app.FindRecordsByFilter("platform_config", "id != ''", "", 1, 0, nil); err == nil && len(records) > 0 {
+				records[0].Set("free_posts_per_day", 1)
+				app.Save(records[0])
+			}
+			app.Logger().Info("Added free_posts_per_day to platform_config")
+		}
 		return nil
 	}
 
-	c := core.NewBaseCollection("platform_config")
+	c = core.NewBaseCollection("platform_config")
 	c.Fields.Add(
 		&core.TextField{Name: "post_fee_usd", Max: 20},
 		&core.TextField{Name: "comment_fee_usd", Max: 20},
 		&core.NumberField{Name: "free_comments_per_day"},
+		&core.NumberField{Name: "free_posts_per_day"},
 		&core.TextField{Name: "starter_balance_usd", Max: 20},
 	)
 
@@ -776,6 +801,7 @@ func ensurePlatformConfigCollection(app *pocketbase.PocketBase) error {
 	record.Set("post_fee_usd", "0.02")
 	record.Set("comment_fee_usd", "0.005")
 	record.Set("free_comments_per_day", 10)
+	record.Set("free_posts_per_day", 1)
 	record.Set("starter_balance_usd", "0.50")
 	if err := app.Save(record); err != nil {
 		app.Logger().Warn("Failed to seed platform_config defaults", "error", err)
