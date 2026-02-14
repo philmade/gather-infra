@@ -136,7 +136,7 @@ These are **untouched** — gather-infra contains copies:
 
 ## Deployment (Production — gather.is)
 
-**Server:** `ssh your-server` (Hetzner at YOUR_SERVER_IP, configured in `~/.ssh/config`)
+**Server:** `ssh <your-server>` (configured in `~/.ssh/config`)
 
 **Code location on server:** `/opt/gather-infra`
 
@@ -150,10 +150,10 @@ These are **untouched** — gather-infra contains copies:
 git push origin main
 
 # 2. SSH to server, pull, rebuild
-ssh your-server "cd /opt/gather-infra && git pull origin main && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build gather-auth"
+ssh <your-server> "cd /opt/gather-infra && git pull origin main && docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build gather-auth"
 
 # 3. If nginx config changed, sync from repo and reload:
-ssh your-server "cp /opt/gather-infra/nginx/gather-platform.conf /etc/nginx/sites-enabled/gather-platform.conf && nginx -t && systemctl reload nginx"
+ssh <your-server> "cp /opt/gather-infra/nginx/gather-platform.conf /etc/nginx/sites-enabled/gather-platform.conf && nginx -t && systemctl reload nginx"
 
 # 4. Verify
 curl -s https://gather.is/api/auth/health

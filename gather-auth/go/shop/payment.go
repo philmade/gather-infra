@@ -18,11 +18,7 @@ const blockchairURL = "https://api.blockchair.com/bitcoin-cash/dashboards/transa
 var satPerBCH = big.NewInt(100_000_000)
 
 func ShopBCHAddress() string {
-	addr := os.Getenv("BCH_ADDRESS")
-	if addr == "" {
-		addr = "YOUR_BCH_ADDRESS"
-	}
-	return addr
+	return os.Getenv("BCH_ADDRESS")
 }
 
 func stripPrefix(address string) string {

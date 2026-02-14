@@ -21,10 +21,7 @@ _TX_ID_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 BLOCKCHAIR_URL = "https://api.blockchair.com/bitcoin-cash/dashboards/transaction"
 
 # Shop's BCH receiving address. Loaded from .env or environment.
-SHOP_BCH_ADDRESS = os.environ.get(
-    "SHOP_BCH_ADDRESS",
-    "YOUR_BCH_ADDRESS",
-)
+SHOP_BCH_ADDRESS = os.environ.get("SHOP_BCH_ADDRESS", "")
 
 SATS_PER_BCH = 100_000_000
 

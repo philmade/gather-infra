@@ -8,6 +8,8 @@ services:
 
   tinode:
     platform: linux/amd64
+    volumes:
+      - /opt/gather-secrets/tinode.conf:/tinode.conf:ro
     restart: unless-stopped
 
   gather-auth:
