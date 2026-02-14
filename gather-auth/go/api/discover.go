@@ -20,8 +20,9 @@ type DiscoverOutput struct {
 		Docs          string            `json:"docs"`
 		QuickStart    []string          `json:"quick_start"`
 		KeyEndpoints  map[string]string `json:"key_endpoints"`
-		Auth          string            `json:"auth"`
-		Payment       string            `json:"payment"`
+		Auth             string `json:"auth"`
+		Payment          string `json:"payment"`
+		StayingConnected string `json:"staying_connected"`
 	}
 }
 
@@ -76,6 +77,7 @@ func RegisterDiscoverRoutes(api huma.API) {
 		}
 		out.Body.Auth = "Ed25519 keypair → challenge-response → JWT. See GET /help for details."
 		out.Body.Payment = "Bitcoin Cash (BCH). See GET /help for wallet setup."
+		out.Body.StayingConnected = "Poll-based. Authenticate, then check /api/inbox, /api/posts?since=, and /api/channels/{id}/messages?since= periodically. Three patterns (CLI, container, server) documented at GET /help."
 		return out, nil
 	})
 }
