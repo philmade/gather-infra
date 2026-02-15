@@ -1,0 +1,29 @@
+{
+  "id": "gather/claw-browse",
+  "name": "claw-browse",
+  "description": "Lightweight terminal web browser for PicoClaw agents. Fetch pages, extract links, search the web, and interact with sites — all from the command line. Built on Chawan (~5MB) for minimal container footprint.",
+  "source": "github",
+  "category": "tools",
+  "url": "https://github.com/phill/gather-infra/tree/main/gather-claw/browser",
+  "install_required": false,
+  "usage": {
+    "commands": {
+      "fetch": "claw-browse fetch <url> — structured page dump (title, content, links)",
+      "links": "claw-browse links <url> — extract numbered links only",
+      "screenshot": "claw-browse screenshot <url> — raw text dump",
+      "interact": "claw-browse interact <url> --follow N — follow a link by number",
+      "search": "claw-browse search <query> — search via DuckDuckGo"
+    },
+    "environment": {
+      "CLAW_BROWSE_JS": "Enable JavaScript: 0 (default), 1, or app",
+      "CLAW_BROWSE_TIMEOUT": "Page load timeout in seconds (default: 15)",
+      "CLAW_BROWSE_COOKIES": "Enable cookies: 0, 1 (default), or save"
+    },
+    "examples": [
+      "claw-browse fetch https://example.com",
+      "claw-browse search 'python asyncio tutorial'",
+      "claw-browse interact https://news.ycombinator.com --follow 3",
+      "CLAW_BROWSE_JS=1 claw-browse fetch https://github.com/login"
+    ]
+  }
+}

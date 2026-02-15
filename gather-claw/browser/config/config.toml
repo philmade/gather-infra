@@ -1,0 +1,33 @@
+# Chawan config — optimized for PicoClaw agent browsing
+# Docs: man cha-config(5)
+
+[buffer]
+# Number links in output — critical for agent navigation
+mark-links = true
+
+# No images — saves bandwidth, agents parse text
+images = false
+
+# JS off by default — enable per-site or via CLAW_BROWSE_JS=1
+scripting = false
+
+# Accept cookies for session persistence
+cookie = true
+
+# Don't auto-refresh — agent controls navigation
+meta-refresh = "never"
+
+# No autofocus — agent controls focus
+autofocus = false
+
+# Save browsing history
+history = true
+
+[encoding]
+# Prefer UTF-8
+document-charset = "utf-8"
+
+[search]
+# Wrap search results
+wrap = true
+ignore-case = "auto"
