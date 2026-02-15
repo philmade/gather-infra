@@ -59,6 +59,7 @@ services:
       BCH_ADDRESS: ${BCH_ADDRESS}
       GELATO_API_KEY: ${GELATO_API_KEY}
       GOOGLE_API_KEY: ${GOOGLE_API_KEY}
+      CLAW_PROVISIONER_KEY: ${CLAW_PROVISIONER_KEY}
     volumes:
       - pocketbase_data:/pb_data
     depends_on:

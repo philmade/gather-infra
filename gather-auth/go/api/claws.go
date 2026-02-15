@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"os"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -21,7 +22,30 @@ type ClawDeployment struct {
 	GithubRepo   string `json:"github_repo,omitempty"`
 	ClawType     string `json:"claw_type"`
 	UserID       string `json:"user_id"`
+	Subdomain    string `json:"subdomain,omitempty"`
+	ContainerID  string `json:"container_id,omitempty"`
+	URL          string `json:"url,omitempty"`
+	Port         int    `json:"port,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
 	Created      string `json:"created"`
+}
+
+func recordToClawDeployment(r *core.Record) ClawDeployment {
+	return ClawDeployment{
+		ID:           r.Id,
+		Name:         r.GetString("name"),
+		Status:       r.GetString("status"),
+		Instructions: r.GetString("instructions"),
+		GithubRepo:   r.GetString("github_repo"),
+		ClawType:     r.GetString("claw_type"),
+		UserID:       r.GetString("user_id"),
+		Subdomain:    r.GetString("subdomain"),
+		ContainerID:  r.GetString("container_id"),
+		URL:          r.GetString("url"),
+		Port:         int(r.GetFloat("port")),
+		ErrorMessage: r.GetString("error_message"),
+		Created:      r.GetString("created"),
+	}
 }
 
 type DeployClawInput struct {
@@ -58,6 +82,28 @@ type ListClawsOutput struct {
 	}
 }
 
+// Provisioner-internal types (host-side provisioner calls these)
+
+type PendingClawsInput struct {
+	ProvisionerKey string `header:"X-Provisioner-Key" doc:"Provisioner shared secret" required:"true"`
+}
+
+type ProvisionResultInput struct {
+	ProvisionerKey string `header:"X-Provisioner-Key" doc:"Provisioner shared secret" required:"true"`
+	ID             string `path:"id" doc:"Deployment ID"`
+	Body           struct {
+		Status       string `json:"status" doc:"New status: running or failed" enum:"running,failed"`
+		ContainerID  string `json:"container_id,omitempty" doc:"Docker container name/ID"`
+		ErrorMessage string `json:"error_message,omitempty" doc:"Error message if failed"`
+	}
+}
+
+type ProvisionResultOutput struct {
+	Body struct {
+		OK bool `json:"ok"`
+	}
+}
+
 // -----------------------------------------------------------------------------
 // Route registration
 // -----------------------------------------------------------------------------
@@ -69,7 +115,7 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 		Method:      "POST",
 		Path:        "/api/claws",
 		Summary:     "Deploy a Claw agent",
-		Description: "Queue a new PicoClaw agent deployment for the authenticated user's workspace.",
+		Description: "Queue a new PicoClaw agent deployment. The hook transitions it to provisioning automatically.",
 		Tags:        []string{"Claws"},
 	}, func(ctx context.Context, input *DeployClawInput) (*DeployClawOutput, error) {
 		userID, err := extractPBUserID(app, input.Authorization)
@@ -104,17 +150,78 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 			return nil, huma.Error500InternalServerError("Failed to create deployment")
 		}
 
+		// Hook fires async — record may still show "queued" here.
+		// Client should poll GET /api/claws/{id} to see status progression.
 		out := &DeployClawOutput{}
-		out.Body = ClawDeployment{
-			ID:           record.Id,
-			Name:         name,
-			Status:       "queued",
-			Instructions: strings.TrimSpace(input.Body.Instructions),
-			GithubRepo:   strings.TrimSpace(input.Body.GithubRepo),
-			ClawType:     clawType,
-			UserID:       userID,
-			Created:      record.GetString("created"),
+		out.Body = recordToClawDeployment(record)
+		return out, nil
+	})
+
+	// GET /api/claws/pending — list claws awaiting provisioning (internal)
+	huma.Register(api, huma.Operation{
+		OperationID: "list-pending-claws",
+		Method:      "GET",
+		Path:        "/api/claws/pending",
+		Summary:     "List claws awaiting provisioning",
+		Description: "Internal endpoint for the host-side provisioner. Requires X-Provisioner-Key header.",
+		Tags:        []string{"Claws"},
+	}, func(ctx context.Context, input *PendingClawsInput) (*ListClawsOutput, error) {
+		expected := os.Getenv("CLAW_PROVISIONER_KEY")
+		if expected == "" || input.ProvisionerKey != expected {
+			return nil, huma.Error401Unauthorized("Invalid provisioner key")
 		}
+
+		records, err := app.FindRecordsByFilter("claw_deployments",
+			"status = 'provisioning'", "-created", 50, 0, nil)
+		if err != nil {
+			records = nil
+		}
+
+		out := &ListClawsOutput{}
+		for _, r := range records {
+			out.Body.Claws = append(out.Body.Claws, recordToClawDeployment(r))
+		}
+		out.Body.Total = len(out.Body.Claws)
+		return out, nil
+	})
+
+	// POST /api/claws/{id}/provision-result — report provisioning outcome (internal)
+	huma.Register(api, huma.Operation{
+		OperationID: "provision-result",
+		Method:      "POST",
+		Path:        "/api/claws/{id}/provision-result",
+		Summary:     "Report claw provisioning result",
+		Description: "Internal endpoint. Host-side provisioner reports success (running) or failure.",
+		Tags:        []string{"Claws"},
+	}, func(ctx context.Context, input *ProvisionResultInput) (*ProvisionResultOutput, error) {
+		expected := os.Getenv("CLAW_PROVISIONER_KEY")
+		if expected == "" || input.ProvisionerKey != expected {
+			return nil, huma.Error401Unauthorized("Invalid provisioner key")
+		}
+
+		if input.Body.Status != "running" && input.Body.Status != "failed" {
+			return nil, huma.Error422UnprocessableEntity("Status must be 'running' or 'failed'")
+		}
+
+		record, err := app.FindRecordById("claw_deployments", input.ID)
+		if err != nil {
+			return nil, huma.Error404NotFound("Deployment not found")
+		}
+
+		record.Set("status", input.Body.Status)
+		if input.Body.ContainerID != "" {
+			record.Set("container_id", input.Body.ContainerID)
+		}
+		if input.Body.ErrorMessage != "" {
+			record.Set("error_message", input.Body.ErrorMessage)
+		}
+
+		if err := app.Save(record); err != nil {
+			return nil, huma.Error500InternalServerError("Failed to update deployment")
+		}
+
+		out := &ProvisionResultOutput{}
+		out.Body.OK = true
 		return out, nil
 	})
 
@@ -142,16 +249,7 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 		}
 
 		out := &GetClawOutput{}
-		out.Body = ClawDeployment{
-			ID:           record.Id,
-			Name:         record.GetString("name"),
-			Status:       record.GetString("status"),
-			Instructions: record.GetString("instructions"),
-			GithubRepo:   record.GetString("github_repo"),
-			ClawType:     record.GetString("claw_type"),
-			UserID:       record.GetString("user_id"),
-			Created:      record.GetString("created"),
-		}
+		out.Body = recordToClawDeployment(record)
 		return out, nil
 	})
 
@@ -178,16 +276,7 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 
 		out := &ListClawsOutput{}
 		for _, r := range records {
-			out.Body.Claws = append(out.Body.Claws, ClawDeployment{
-				ID:           r.Id,
-				Name:         r.GetString("name"),
-				Status:       r.GetString("status"),
-				Instructions: r.GetString("instructions"),
-				GithubRepo:   r.GetString("github_repo"),
-				ClawType:     r.GetString("claw_type"),
-				UserID:       r.GetString("user_id"),
-				Created:      r.GetString("created"),
-			})
+			out.Body.Claws = append(out.Body.Claws, recordToClawDeployment(r))
 		}
 		out.Body.Total = len(out.Body.Claws)
 		return out, nil

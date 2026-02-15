@@ -51,6 +51,9 @@ func main() {
 	// Register PocketBase auth hooks for Tinode user sync
 	registerTinodeHooks(app, tinodeAddr, apiKey)
 
+	// Register claw deployment hooks (queued → provisioning)
+	registerClawHooks(app)
+
 	app.OnServe().BindFunc(func(e *core.ServeEvent) error {
 		// Bootstrap admin + collections
 		if err := autoBootstrap(app); err != nil {
@@ -1287,13 +1290,80 @@ func ensureWaitlistCollection(app *pocketbase.PocketBase) error {
 	return nil
 }
 
+// =============================================================================
+// Claw deployment hooks
+// =============================================================================
+
+func registerClawHooks(app *pocketbase.PocketBase) {
+	app.OnRecordAfterCreateSuccess("claw_deployments").BindFunc(func(e *core.RecordEvent) error {
+		record := e.Record
+		go func() {
+			port := allocateClawPort(app)
+
+			// Derive subdomain from claw name (lowercase alphanumeric only)
+			name := strings.ToLower(record.GetString("name"))
+			subdomain := ""
+			for _, c := range name {
+				if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+					subdomain += string(c)
+				}
+			}
+			if subdomain == "" {
+				subdomain = record.Id[:8]
+			}
+
+			record.Set("port", port)
+			record.Set("subdomain", subdomain)
+			record.Set("status", "provisioning")
+			record.Set("url", fmt.Sprintf("https://%s.claw.gather.is", subdomain))
+			record.Set("container_id", fmt.Sprintf("claw-%s", subdomain))
+
+			if err := app.Save(record); err != nil {
+				app.Logger().Error("Failed to transition claw to provisioning",
+					"id", record.Id, "error", err)
+			} else {
+				app.Logger().Info("Claw ready for provisioning",
+					"id", record.Id, "name", record.GetString("name"),
+					"subdomain", subdomain, "port", port)
+			}
+		}()
+		return e.Next()
+	})
+}
+
+func allocateClawPort(app *pocketbase.PocketBase) int {
+	records, err := app.FindRecordsByFilter("claw_deployments",
+		"port > 0", "-port", 1, 0, nil)
+	if err != nil || len(records) == 0 {
+		return 10000
+	}
+	highest := int(records[0].GetFloat("port"))
+	return highest + 1
+}
+
 func ensureClawDeploymentsCollection(app *pocketbase.PocketBase) error {
-	_, err := app.FindCollectionByNameOrId("claw_deployments")
+	c, err := app.FindCollectionByNameOrId("claw_deployments")
 	if err == nil {
+		// Migration: add subdomain + error_message fields
+		changed := false
+		if c.Fields.GetByName("subdomain") == nil {
+			c.Fields.Add(&core.TextField{Name: "subdomain", Max: 50})
+			changed = true
+		}
+		if c.Fields.GetByName("error_message") == nil {
+			c.Fields.Add(&core.TextField{Name: "error_message", Max: 500})
+			changed = true
+		}
+		if changed {
+			if err := app.Save(c); err != nil {
+				return fmt.Errorf("migrate claw_deployments collection: %w", err)
+			}
+			app.Logger().Info("Migrated claw_deployments collection (added subdomain, error_message)")
+		}
 		return nil
 	}
 
-	c := core.NewBaseCollection("claw_deployments")
+	c = core.NewBaseCollection("claw_deployments")
 	c.Fields.Add(
 		&core.TextField{Name: "name", Required: true, Max: 50},
 		&core.TextField{Name: "status", Required: true, Max: 20},
@@ -1301,9 +1371,11 @@ func ensureClawDeploymentsCollection(app *pocketbase.PocketBase) error {
 		&core.TextField{Name: "github_repo", Max: 200},
 		&core.TextField{Name: "claw_type", Max: 50},
 		&core.TextField{Name: "user_id", Required: true, Max: 50},
+		&core.TextField{Name: "subdomain", Max: 50},
 		&core.TextField{Name: "container_id", Max: 100},
 		&core.TextField{Name: "url", Max: 200},
 		&core.NumberField{Name: "port"},
+		&core.TextField{Name: "error_message", Max: 500},
 		&core.AutodateField{Name: "created", OnCreate: true},
 	)
 	c.AddIndex("idx_claw_user", false, "user_id", "")

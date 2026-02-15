@@ -42,7 +42,7 @@ export default function Participants() {
   const { getMembers, myUserId } = useChat()
   const [deployedClaws, setDeployedClaws] = useState<ClawDeployment[]>([])
 
-  // Fetch user's claw deployments
+  // Fetch user's claw deployments (poll every 15s to catch status changes)
   useEffect(() => {
     async function fetchClaws() {
       try {
@@ -58,6 +58,8 @@ export default function Participants() {
       }
     }
     fetchClaws()
+    const interval = setInterval(fetchClaws, 15000)
+    return () => clearInterval(interval)
   }, [])
 
   const members = getMembers()
