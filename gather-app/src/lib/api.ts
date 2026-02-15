@@ -83,4 +83,28 @@ export function getMenu() {
   return apiFetch('/api/menu')
 }
 
+// Claws
+export interface ClawDeployment {
+  id: string
+  name: string
+  status: string
+  instructions?: string
+  github_repo?: string
+  claw_type: string
+  user_id: string
+  created: string
+}
+
+export function deployClaw(body: { name: string; instructions?: string; github_repo?: string }) {
+  return apiPost<ClawDeployment>('/api/claws', body)
+}
+
+export function getClawStatus(id: string) {
+  return apiFetch<ClawDeployment>(`/api/claws/${encodeURIComponent(id)}`)
+}
+
+export function listClaws() {
+  return apiFetch<{ claws: ClawDeployment[]; total: number }>('/api/claws')
+}
+
 export { apiFetch, apiPost }
