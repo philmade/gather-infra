@@ -17,7 +17,7 @@ FROM alpine:3.19
 
 WORKDIR /app
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata docker-cli
 
 COPY --from=builder /app/gather-auth /app/gather-auth
 

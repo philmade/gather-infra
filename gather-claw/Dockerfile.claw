@@ -1,0 +1,7 @@
+# Claw microcontainer — browser-accessible terminal for PicoClaw/RustClaw agents
+# ~15MB total. ttyd provides a web shell on port 7681.
+# The agent binary (PicoClaw/RustClaw) gets added as it matures.
+FROM alpine:3.19
+RUN apk add --no-cache ttyd bash curl
+EXPOSE 7681
+CMD ["ttyd", "-W", "-p", "7681", "bash"]

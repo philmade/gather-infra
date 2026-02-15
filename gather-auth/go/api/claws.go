@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"os"
+	"os/exec"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
@@ -257,6 +258,12 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 
 		if record.GetString("user_id") != userID {
 			return nil, huma.Error404NotFound("Deployment not found")
+		}
+
+		// Remove the Docker container if it exists
+		containerID := record.GetString("container_id")
+		if containerID != "" {
+			exec.Command("docker", "rm", "-f", containerID).Run()
 		}
 
 		if err := app.Delete(record); err != nil {

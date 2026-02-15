@@ -8,7 +8,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -73,6 +76,21 @@ func main() {
 				app.Logger().Info("Tinode is reachable", "addr", tinodeAddr)
 			}
 		}()
+
+		// --- Claw reverse proxy (*.claw.gather.is) ---
+		// Must be first — intercepts claw subdomain requests before any route matching.
+		e.Router.BindFunc(func(re *core.RequestEvent) error {
+			host := re.Request.Host
+			// Strip port if present (e.g. local dev)
+			if idx := strings.LastIndex(host, ":"); idx > 0 {
+				host = host[:idx]
+			}
+			if strings.HasSuffix(host, ".claw.gather.is") {
+				subdomain := strings.TrimSuffix(host, ".claw.gather.is")
+				return proxyToClawContainer(app, re, subdomain)
+			}
+			return re.Next()
+		})
 
 		// --- Huma API (OpenAPI docs + typed handlers) ---
 
@@ -1291,54 +1309,141 @@ func ensureWaitlistCollection(app *pocketbase.PocketBase) error {
 }
 
 // =============================================================================
+// Claw reverse proxy
+// =============================================================================
+
+func proxyToClawContainer(app *pocketbase.PocketBase, re *core.RequestEvent, subdomain string) error {
+	// Look up claw by subdomain
+	records, err := app.FindRecordsByFilter("claw_deployments",
+		"subdomain = {:sub}", "", 1, 0,
+		map[string]any{"sub": subdomain})
+	if err != nil || len(records) == 0 {
+		re.Response.WriteHeader(http.StatusNotFound)
+		re.Response.Write([]byte("Claw not found"))
+		return nil
+	}
+
+	record := records[0]
+	status := record.GetString("status")
+	if status != "running" {
+		re.Response.WriteHeader(http.StatusServiceUnavailable)
+		re.Response.Write([]byte(fmt.Sprintf("Claw is %s, not running", status)))
+		return nil
+	}
+
+	containerName := record.GetString("container_id")
+	target, _ := url.Parse(fmt.Sprintf("http://%s:7681", containerName))
+
+	proxy := &httputil.ReverseProxy{
+		Director: func(req *http.Request) {
+			req.URL.Scheme = target.Scheme
+			req.URL.Host = target.Host
+			req.URL.Path = re.Request.URL.Path
+			req.URL.RawQuery = re.Request.URL.RawQuery
+			req.Host = target.Host
+		},
+	}
+
+	// Forward WebSocket upgrade headers
+	if strings.EqualFold(re.Request.Header.Get("Upgrade"), "websocket") {
+		re.Response.Header().Set("Connection", "Upgrade")
+	}
+
+	proxy.ServeHTTP(re.Response, re.Request)
+	return nil
+}
+
+// =============================================================================
 // Claw deployment hooks
 // =============================================================================
 
 func registerClawHooks(app *pocketbase.PocketBase) {
 	app.OnRecordAfterCreateSuccess("claw_deployments").BindFunc(func(e *core.RecordEvent) error {
 		record := e.Record
-		go func() {
-			port := allocateClawPort(app)
-
-			// Derive subdomain from claw name (lowercase alphanumeric only)
-			name := strings.ToLower(record.GetString("name"))
-			subdomain := ""
-			for _, c := range name {
-				if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
-					subdomain += string(c)
-				}
-			}
-			if subdomain == "" {
-				subdomain = record.Id[:8]
-			}
-
-			record.Set("port", port)
-			record.Set("subdomain", subdomain)
-			record.Set("status", "provisioning")
-			record.Set("url", fmt.Sprintf("https://%s.claw.gather.is", subdomain))
-			record.Set("container_id", fmt.Sprintf("claw-%s", subdomain))
-
-			if err := app.Save(record); err != nil {
-				app.Logger().Error("Failed to transition claw to provisioning",
-					"id", record.Id, "error", err)
-			} else {
-				app.Logger().Info("Claw ready for provisioning",
-					"id", record.Id, "name", record.GetString("name"),
-					"subdomain", subdomain, "port", port)
-			}
-		}()
+		go provisionClaw(app, record)
 		return e.Next()
 	})
 }
 
-func allocateClawPort(app *pocketbase.PocketBase) int {
-	records, err := app.FindRecordsByFilter("claw_deployments",
-		"port > 0", "-port", 1, 0, nil)
-	if err != nil || len(records) == 0 {
-		return 10000
+// provisionClaw creates a real Docker container for a claw deployment.
+func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
+	// Derive subdomain from claw name (lowercase alphanumeric only)
+	name := strings.ToLower(record.GetString("name"))
+	subdomain := ""
+	for _, c := range name {
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') {
+			subdomain += string(c)
+		}
 	}
-	highest := int(records[0].GetFloat("port"))
-	return highest + 1
+	if subdomain == "" {
+		subdomain = record.Id[:8]
+	}
+
+	containerName := fmt.Sprintf("claw-%s", subdomain)
+
+	record.Set("subdomain", subdomain)
+	record.Set("status", "provisioning")
+	record.Set("container_id", containerName)
+	if err := app.Save(record); err != nil {
+		app.Logger().Error("Failed to transition claw to provisioning",
+			"id", record.Id, "error", err)
+		return
+	}
+
+	image := os.Getenv("CLAW_DOCKER_IMAGE")
+	if image == "" {
+		image = "claw-base:latest"
+	}
+	network := os.Getenv("CLAW_DOCKER_NETWORK")
+	if network == "" {
+		network = "gather-infra_gather_net"
+	}
+
+	// Create the container
+	cmd := exec.Command("docker", "run", "-d",
+		"--name", containerName,
+		"--network", network,
+		"--restart", "unless-stopped",
+		"--memory", "512m",
+		"--cpus", "1",
+		image,
+	)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		record.Set("status", "failed")
+		record.Set("error_message", strings.TrimSpace(string(output)))
+		if saveErr := app.Save(record); saveErr != nil {
+			app.Logger().Error("Failed to save claw failure", "id", record.Id, "error", saveErr)
+		}
+		app.Logger().Error("Failed to create claw container",
+			"id", record.Id, "container", containerName, "error", err, "output", string(output))
+		return
+	}
+
+	// Verify container is running
+	inspect := exec.Command("docker", "inspect", "--format", "{{.State.Running}}", containerName)
+	inspectOut, err := inspect.CombinedOutput()
+	running := strings.TrimSpace(string(inspectOut)) == "true"
+
+	if err != nil || !running {
+		record.Set("status", "failed")
+		record.Set("error_message", "Container started but is not running")
+		if saveErr := app.Save(record); saveErr != nil {
+			app.Logger().Error("Failed to save claw failure", "id", record.Id, "error", saveErr)
+		}
+		// Clean up the failed container
+		exec.Command("docker", "rm", "-f", containerName).Run()
+		return
+	}
+
+	record.Set("status", "running")
+	record.Set("url", fmt.Sprintf("https://%s.claw.gather.is", subdomain))
+	if err := app.Save(record); err != nil {
+		app.Logger().Error("Failed to save claw running status", "id", record.Id, "error", err)
+	} else {
+		app.Logger().Info("Claw container running",
+			"id", record.Id, "container", containerName, "subdomain", subdomain)
+	}
 }
 
 func ensureClawDeploymentsCollection(app *pocketbase.PocketBase) error {
