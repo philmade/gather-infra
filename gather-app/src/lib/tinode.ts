@@ -39,13 +39,12 @@ export interface WorkspaceInfo {
   owner: string
 }
 
-function detectConfig(): TinodeConfig {
+function detectHost(): { host: string; secure: boolean } {
   const hostname = window.location.hostname
   const isProduction = hostname !== 'localhost' && hostname !== '127.0.0.1'
   return {
     host: isProduction ? window.location.host : 'localhost:6060',
     secure: isProduction || window.location.protocol === 'https:',
-    apiKey: 'AQAAAAABAADfQzccXRHl9YIk-qQpvnkn',
   }
 }
 
@@ -61,13 +60,13 @@ export class TinodeClient {
   onMessage: ((msg: ChatMessage) => void) | null = null
   onChannelsUpdated: (() => void) | null = null
 
-  constructor(config?: TinodeConfig) {
-    const cfg = config || detectConfig()
+  constructor(apiKey: string, config?: Omit<TinodeConfig, 'apiKey'>) {
+    const hostConfig = config || detectHost()
     this.client = new Tinode({
       appName: 'GatherApp',
-      host: cfg.host,
-      apiKey: cfg.apiKey,
-      secure: cfg.secure,
+      host: hostConfig.host,
+      apiKey,
+      secure: hostConfig.secure,
       transport: 'ws',
     })
 

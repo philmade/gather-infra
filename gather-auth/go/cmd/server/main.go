@@ -155,7 +155,7 @@ func main() {
 		// --- PocketBase-native routes (require PocketBase auth middleware) ---
 
 		e.Router.GET("/api/tinode/credentials", func(re *core.RequestEvent) error {
-			return handleTinodeCredentials(re)
+			return handleTinodeCredentials(re, apiKey)
 		}).Bind(apis.RequireAuth())
 
 		e.Router.POST("/api/sdk/register-agents", func(re *core.RequestEvent) error {
@@ -942,7 +942,7 @@ func generateTinodePassword(seed string) string {
 // Tinode credentials endpoint (for authenticated users)
 // =============================================================================
 
-func handleTinodeCredentials(re *core.RequestEvent) error {
+func handleTinodeCredentials(re *core.RequestEvent, tinodeAPIKey string) error {
 	info, _ := re.RequestInfo()
 	if info.Auth == nil {
 		return apis.NewUnauthorizedError("Authentication required", nil)
@@ -955,6 +955,7 @@ func handleTinodeCredentials(re *core.RequestEvent) error {
 	return re.JSON(200, map[string]interface{}{
 		"login":    login,
 		"password": password,
+		"apiKey":   tinodeAPIKey,
 	})
 }
 

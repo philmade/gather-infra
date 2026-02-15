@@ -84,36 +84,40 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
 
     let cancelled = false
-    const client = new TinodeClient()
-    clientRef.current = client
-
-    client.onMessage = (msg) => {
-      if (!cancelled) dispatch({ type: 'ADD_MESSAGE', message: msg })
-    }
-
-    client.onChannelsUpdated = () => {
-      if (!cancelled) dispatch({ type: 'SET_CHANNELS', channels: client.getChannels() })
-    }
 
     async function init() {
       try {
-        console.log('[Chat] Step 1: Connecting to Tinode WebSocket...')
-        await client.connect()
-        if (cancelled) { client.disconnect(); return }
-        console.log('[Chat] Step 2: Connected. Fetching credentials...')
-
+        // Step 1: Fetch credentials (includes API key) before creating client
+        console.log('[Chat] Step 1: Fetching Tinode credentials...')
         const resp = await fetch(pb.baseURL + '/api/tinode/credentials', {
           headers: { Authorization: `Bearer ${pb.authStore.token}` },
         })
-        if (cancelled) { client.disconnect(); return }
+        if (cancelled) return
 
         if (!resp.ok) {
           const body = await resp.text()
           throw new Error(`Tinode credentials: HTTP ${resp.status} — ${body}`)
         }
 
-        const creds = await resp.json() as { login: string; password: string }
-        console.log('[Chat] Step 3: Got credentials, logging in as', creds.login)
+        const creds = await resp.json() as { login: string; password: string; apiKey: string }
+        if (cancelled) return
+
+        // Step 2: Create client with server-provided API key
+        console.log('[Chat] Step 2: Connecting to Tinode WebSocket...')
+        const client = new TinodeClient(creds.apiKey)
+        clientRef.current = client
+
+        client.onMessage = (msg) => {
+          if (!cancelled) dispatch({ type: 'ADD_MESSAGE', message: msg })
+        }
+
+        client.onChannelsUpdated = () => {
+          if (!cancelled) dispatch({ type: 'SET_CHANNELS', channels: client.getChannels() })
+        }
+
+        await client.connect()
+        if (cancelled) { client.disconnect(); return }
+        console.log('[Chat] Step 3: Connected. Logging in as', creds.login)
 
         await client.login(creds.login, creds.password)
         if (cancelled) { client.disconnect(); return }
@@ -153,7 +157,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
 
     return () => {
       cancelled = true
-      client.disconnect()
+      clientRef.current?.disconnect()
+      clientRef.current = null
     }
   }, [authState.isAuthenticated])
 
