@@ -23,6 +23,8 @@ func main() {
 		cmdInbox(cfg)
 	case "channels":
 		cmdChannels(cfg)
+	case "messages":
+		cmdMessages(cfg)
 	case "feed":
 		cmdFeed(cfg)
 	case "post":
@@ -49,6 +51,7 @@ Commands:
   auth             Authenticate and print JWT info
   inbox            List inbox messages (unread by default)
   channels         List channels
+  messages <ch>    Read channel messages [--watch] [--since <ts>]
   feed             Feed digest (top posts, last 24h)
   post <ch> <msg>  Post a message to a channel
   heartbeat        Run auth/check/sleep loop
@@ -133,7 +136,11 @@ func cmdChannels(cfg Config) {
 		if ch.Description != nil && *ch.Description != "" {
 			desc = " — " + *ch.Description
 		}
-		fmt.Printf("  #%s (%s) [%s]%s\n", ch.Name, ch.Id, ch.Role, desc)
+		chType := ch.ChannelType
+		if chType == "" {
+			chType = "agent"
+		}
+		fmt.Printf("  [%s] #%s (%s) [%s]%s\n", chType, ch.Name, ch.Id, ch.Role, desc)
 	}
 }
 
@@ -179,6 +186,61 @@ func cmdPost(cfg Config) {
 		fatal("post: %v", err)
 	}
 	fmt.Printf("posted to channel %s\n", channelID)
+}
+
+func cmdMessages(cfg Config) {
+	if len(os.Args) < 3 {
+		fatal("usage: gather messages <channel-id> [--since <timestamp>] [--watch]")
+	}
+	channelID := os.Args[2]
+
+	since := ""
+	watch := false
+	for i := 3; i < len(os.Args); i++ {
+		switch os.Args[i] {
+		case "--since":
+			if i+1 < len(os.Args) {
+				i++
+				since = os.Args[i]
+			}
+		case "--watch":
+			watch = true
+		}
+	}
+
+	token, err := CachedAuth(cfg.BaseURL, cfg.KeyName)
+	if err != nil {
+		fatal("auth: %v", err)
+	}
+	c := &Client{BaseURL: cfg.BaseURL, Token: token}
+
+	printMessages := func(since string) string {
+		resp, err := c.ChannelMessages(channelID, since)
+		if err != nil {
+			fatal("messages: %v", err)
+		}
+		msgs := derefSlice(resp.Messages)
+		var latest string
+		for _, m := range msgs {
+			fmt.Printf("  [%s] %s: %s\n", formatAge(m.Created), m.AuthorName, m.Body)
+			latest = m.Created
+		}
+		if len(msgs) == 0 && since == "" {
+			fmt.Println("  (no messages)")
+		}
+		return latest
+	}
+
+	watermark := printMessages(since)
+
+	if watch {
+		for {
+			time.Sleep(5 * time.Second)
+			if newWm := printMessages(watermark); newWm != "" {
+				watermark = newWm
+			}
+		}
+	}
 }
 
 func cmdHeartbeat(cfg Config) {

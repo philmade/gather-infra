@@ -1,6 +1,15 @@
 # Claw microcontainer — browser-accessible terminal for PicoClaw/RustClaw agents
-# Includes Chawan terminal browser (~5MB) and claw-browse agent harness.
+# Includes Chawan terminal browser (~5MB), gather CLI, and claw-browse agent harness.
 # ttyd provides a web shell on port 7681.
+#
+# Build context must be the repo root:
+#   docker build -t claw-base:latest -f gather-claw/Dockerfile.claw .
+
+# === Stage 0: Build gather CLI ===
+FROM golang:1.24-alpine AS cli-builder
+WORKDIR /build
+COPY gather-cli/ .
+RUN go build -o gather .
 
 # === Stage 1: Build Chawan from source ===
 FROM alpine:3.21 AS builder
@@ -34,12 +43,15 @@ COPY --from=builder /chawan-install/usr/local/bin/cha /usr/local/bin/cha
 COPY --from=builder /chawan-install/usr/local/bin/mancha /usr/local/bin/mancha
 COPY --from=builder /chawan-install/usr/local/libexec/chawan/ /usr/local/libexec/chawan/
 
+# Copy gather CLI
+COPY --from=cli-builder /build/gather /usr/local/bin/gather
+
 # Install claw-browse harness + config
-COPY browser/claw-browse /usr/local/bin/claw-browse
-COPY browser/config/config.toml /etc/claw-browse/config.toml
+COPY gather-claw/browser/claw-browse /usr/local/bin/claw-browse
+COPY gather-claw/browser/config/config.toml /etc/claw-browse/config.toml
 
 # Branded entrypoint
-COPY entrypoint.sh /usr/local/bin/claw-entrypoint
+COPY gather-claw/entrypoint.sh /usr/local/bin/claw-entrypoint
 RUN chmod +x /usr/local/bin/claw-entrypoint
 
 EXPOSE 7681

@@ -26,6 +26,7 @@ type CreateChannelInput struct {
 	Body          struct {
 		Name        string   `json:"name" doc:"Channel name" minLength:"1" maxLength:"100"`
 		Description string   `json:"description,omitempty" doc:"Channel purpose or description" maxLength:"500"`
+		ChannelType string   `json:"channel_type,omitempty" doc:"Channel type: agent or human (default: agent)" maxLength:"20"`
 		Members     []string `json:"members,omitempty" doc:"Agent IDs to invite at creation"`
 	}
 }
@@ -34,6 +35,7 @@ type ChannelItem struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
+	ChannelType string `json:"channel_type"`
 	CreatedBy   string `json:"created_by"`
 	Role        string `json:"role"`
 	Created     string `json:"created"`
@@ -73,6 +75,7 @@ type ChannelDetailOutput struct {
 		ID          string              `json:"id"`
 		Name        string              `json:"name"`
 		Description string              `json:"description,omitempty"`
+		ChannelType string              `json:"channel_type"`
 		CreatedBy   string              `json:"created_by"`
 		Members     []ChannelMemberItem `json:"members"`
 		Created     string              `json:"created"`
@@ -171,15 +174,21 @@ func RegisterChannelRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []by
 			return nil, huma.Error500InternalServerError("channels collection not found")
 		}
 
+		chType := input.Body.ChannelType
+		if chType == "" {
+			chType = "agent"
+		}
+
 		record := core.NewRecord(col)
 		record.Set("name", input.Body.Name)
 		record.Set("description", input.Body.Description)
 		record.Set("created_by", claims.AgentID)
+		record.Set("channel_type", chType)
 		if err := app.Save(record); err != nil {
 			return nil, huma.Error500InternalServerError("Failed to create channel")
 		}
 
-		addChannelMember(app, record.Id, claims.AgentID, "owner")
+		AddChannelMember(app, record.Id, claims.AgentID, "owner")
 
 		invited := 0
 		for _, memberID := range input.Body.Members {
@@ -189,7 +198,7 @@ func RegisterChannelRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []by
 			if _, err := app.FindRecordById("agents", memberID); err != nil {
 				continue
 			}
-			addChannelMember(app, record.Id, memberID, "member")
+			AddChannelMember(app, record.Id, memberID, "member")
 			SendInboxMessage(app, memberID, "channel_invite",
 				fmt.Sprintf("Invited to channel: %s", input.Body.Name),
 				fmt.Sprintf("You've been invited to the private channel '%s'. "+
@@ -205,6 +214,7 @@ func RegisterChannelRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []by
 			ID:          record.Id,
 			Name:        input.Body.Name,
 			Description: input.Body.Description,
+			ChannelType: chType,
 			CreatedBy:   agentName(app, claims.AgentID),
 			Role:        "owner",
 			Created:     record.GetString("created"),
@@ -241,6 +251,7 @@ func RegisterChannelRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []by
 				ID:          ch.Id,
 				Name:        ch.GetString("name"),
 				Description: ch.GetString("description"),
+				ChannelType: channelType(ch),
 				CreatedBy:   agentName(app, ch.GetString("created_by")),
 				Role:        m.GetString("role"),
 				Created:     ch.GetString("created"),
@@ -294,6 +305,7 @@ func RegisterChannelRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []by
 		out.Body.ID = ch.Id
 		out.Body.Name = ch.GetString("name")
 		out.Body.Description = ch.GetString("description")
+		out.Body.ChannelType = channelType(ch)
 		out.Body.CreatedBy = agentName(app, ch.GetString("created_by"))
 		out.Body.Members = members
 		out.Body.Created = ch.GetString("created")
@@ -332,7 +344,7 @@ func RegisterChannelRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []by
 			return nil, huma.Error409Conflict("Agent is already a member of this channel")
 		}
 
-		addChannelMember(app, input.ID, input.Body.AgentID, "member")
+		AddChannelMember(app, input.ID, input.Body.AgentID, "member")
 
 		chName := ch.GetString("name")
 		SendInboxMessage(app, input.Body.AgentID, "channel_invite",
@@ -487,7 +499,7 @@ func RegisterChannelRoutes(api huma.API, app *pocketbase.PocketBase, jwtKey []by
 // Helpers
 // -----------------------------------------------------------------------------
 
-func addChannelMember(app *pocketbase.PocketBase, channelID, agentID, role string) {
+func AddChannelMember(app *pocketbase.PocketBase, channelID, agentID, role string) {
 	col, err := app.FindCollectionByNameOrId("channel_members")
 	if err != nil {
 		return
@@ -513,6 +525,14 @@ func agentName(app *pocketbase.PocketBase, agentID string) string {
 		}
 	}
 	return agentID
+}
+
+func channelType(ch *core.Record) string {
+	t := ch.GetString("channel_type")
+	if t == "" {
+		return "agent"
+	}
+	return t
 }
 
 func generateAgentChatPassword(agentID, secret string) string {

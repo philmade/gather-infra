@@ -219,6 +219,7 @@ type ChallengeSkillInfo struct {
 
 // ChannelDetailOutputBody defines model for ChannelDetailOutputBody.
 type ChannelDetailOutputBody struct {
+	ChannelType string               `json:"channel_type"`
 	Created     string               `json:"created"`
 	CreatedBy   string               `json:"created_by"`
 	Description *string              `json:"description,omitempty"`
@@ -241,6 +242,7 @@ type ChannelInviteOutputBody struct {
 
 // ChannelItem defines model for ChannelItem.
 type ChannelItem struct {
+	ChannelType string  `json:"channel_type"`
 	Created     string  `json:"created"`
 	CreatedBy   string  `json:"created_by"`
 	Description *string `json:"description,omitempty"`

@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"log"
 	"net/http"
@@ -1219,16 +1222,25 @@ func formatDisplayName(handle string) string {
 // =============================================================================
 
 func ensureChannelsCollection(app *pocketbase.PocketBase) error {
-	_, err := app.FindCollectionByNameOrId("channels")
+	c, err := app.FindCollectionByNameOrId("channels")
 	if err == nil {
+		// Migration: add channel_type field if missing
+		if c.Fields.GetByName("channel_type") == nil {
+			c.Fields.Add(&core.TextField{Name: "channel_type", Max: 20})
+			if err := app.Save(c); err != nil {
+				return fmt.Errorf("migrate channels collection (add channel_type): %w", err)
+			}
+			app.Logger().Info("Added channel_type field to channels collection")
+		}
 		return nil
 	}
 
-	c := core.NewBaseCollection("channels")
+	c = core.NewBaseCollection("channels")
 	c.Fields.Add(
 		&core.TextField{Name: "name", Required: true, Max: 100},
 		&core.TextField{Name: "description", Max: 500},
 		&core.TextField{Name: "created_by", Required: true, Max: 50},
+		&core.TextField{Name: "channel_type", Max: 20},
 		&core.AutodateField{Name: "created", OnCreate: true},
 	)
 	c.AddIndex("idx_channels_created_by", false, "created_by", "")
@@ -1391,7 +1403,8 @@ func registerClawHooks(app *pocketbase.PocketBase) {
 	})
 }
 
-// provisionClaw creates a real Docker container for a claw deployment.
+// provisionClaw creates a real Docker container for a claw deployment,
+// including a Gather agent identity (Ed25519 keypair) and default channel.
 func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 	// Derive subdomain from claw name (lowercase alphanumeric only)
 	name := strings.ToLower(record.GetString("name"))
@@ -1406,6 +1419,7 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 	}
 
 	containerName := fmt.Sprintf("claw-%s", subdomain)
+	clawDisplayName := record.GetString("name")
 
 	record.Set("subdomain", subdomain)
 	record.Set("status", "provisioning")
@@ -1416,6 +1430,83 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 		return
 	}
 
+	// --- Generate Gather agent identity ---
+	kp, err := auth.GenerateKeyPair()
+	if err != nil {
+		app.Logger().Error("Failed to generate claw keypair", "id", record.Id, "error", err)
+		record.Set("status", "failed")
+		record.Set("error_message", "keypair generation failed")
+		app.Save(record)
+		return
+	}
+
+	pubPEM, _ := auth.EncodePEM(kp.PublicKey)
+	privBytes, err := x509.MarshalPKCS8PrivateKey(kp.PrivateKey)
+	if err != nil {
+		app.Logger().Error("Failed to marshal claw private key", "id", record.Id, "error", err)
+		record.Set("status", "failed")
+		record.Set("error_message", "private key marshal failed")
+		app.Save(record)
+		return
+	}
+	privPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: privBytes})
+
+	// Create agent record (direct DB insert, no PoW needed for claws)
+	fp := auth.Fingerprint(kp.PublicKey)
+	agentCol, err := app.FindCollectionByNameOrId("agents")
+	if err != nil {
+		app.Logger().Error("Failed to find agents collection", "id", record.Id, "error", err)
+		record.Set("status", "failed")
+		record.Set("error_message", "agents collection not found")
+		app.Save(record)
+		return
+	}
+
+	agentRec := core.NewRecord(agentCol)
+	agentRec.Set("name", clawDisplayName)
+	agentRec.Set("description", fmt.Sprintf("Claw agent: %s", clawDisplayName))
+	agentRec.Set("public_key", string(pubPEM))
+	agentRec.Set("pubkey_fingerprint", fp)
+	agentRec.Set("verified", false)
+	if err := app.Save(agentRec); err != nil {
+		app.Logger().Error("Failed to create claw agent record", "id", record.Id, "error", err)
+		record.Set("status", "failed")
+		record.Set("error_message", "agent record creation failed")
+		app.Save(record)
+		return
+	}
+
+	// Store agent_id on claw record
+	record.Set("agent_id", agentRec.Id)
+	app.Save(record)
+
+	// Create default agent channel
+	var channelID string
+	chCol, err := app.FindCollectionByNameOrId("channels")
+	if err == nil {
+		chRec := core.NewRecord(chCol)
+		chRec.Set("name", fmt.Sprintf("claw-%s", subdomain))
+		chRec.Set("description", fmt.Sprintf("Default channel for %s", clawDisplayName))
+		chRec.Set("created_by", agentRec.Id)
+		chRec.Set("channel_type", "agent")
+		if err := app.Save(chRec); err == nil {
+			channelID = chRec.Id
+			gatherapi.AddChannelMember(app, chRec.Id, agentRec.Id, "owner")
+		}
+	}
+
+	// Send welcome inbox message
+	gatherapi.SendInboxMessage(app, agentRec.Id, "welcome",
+		fmt.Sprintf("Welcome, %s!", clawDisplayName),
+		fmt.Sprintf("Your claw is live. Run `gather auth` to authenticate, "+
+			"`gather channels` to see your channels, "+
+			"`gather post %s 'hello'` to send your first message.", channelID),
+		"", "")
+
+	app.Logger().Info("Claw agent identity created",
+		"id", record.Id, "agent_id", agentRec.Id, "channel_id", channelID)
+
+	// --- Launch Docker container with identity env vars ---
 	image := os.Getenv("CLAW_DOCKER_IMAGE")
 	if image == "" {
 		image = "claw-base:latest"
@@ -1425,8 +1516,15 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 		network = "gather-infra_gather_net"
 	}
 
-	// Create the container
-	clawDisplayName := record.GetString("name")
+	// Base64-encode PEM keys (they contain newlines)
+	privB64 := base64.StdEncoding.EncodeToString(privPEM)
+	pubB64 := base64.StdEncoding.EncodeToString(pubPEM)
+
+	baseURL := os.Getenv("GATHER_BASE_URL")
+	if baseURL == "" {
+		baseURL = "https://gather.is"
+	}
+
 	cmd := exec.Command("docker", "run", "-d",
 		"--name", containerName,
 		"--network", network,
@@ -1434,6 +1532,11 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 		"--memory", "512m",
 		"--cpus", "1",
 		"-e", fmt.Sprintf("CLAW_NAME=%s", clawDisplayName),
+		"-e", fmt.Sprintf("GATHER_PRIVATE_KEY=%s", privB64),
+		"-e", fmt.Sprintf("GATHER_PUBLIC_KEY=%s", pubB64),
+		"-e", fmt.Sprintf("GATHER_AGENT_ID=%s", agentRec.Id),
+		"-e", fmt.Sprintf("GATHER_CHANNEL_ID=%s", channelID),
+		"-e", fmt.Sprintf("GATHER_BASE_URL=%s", baseURL),
 		image,
 	)
 	output, err := cmd.CombinedOutput()
@@ -1470,7 +1573,8 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 		app.Logger().Error("Failed to save claw running status", "id", record.Id, "error", err)
 	} else {
 		app.Logger().Info("Claw container running",
-			"id", record.Id, "container", containerName, "subdomain", subdomain)
+			"id", record.Id, "container", containerName, "subdomain", subdomain,
+			"agent_id", agentRec.Id)
 	}
 }
 
@@ -1487,11 +1591,15 @@ func ensureClawDeploymentsCollection(app *pocketbase.PocketBase) error {
 			c.Fields.Add(&core.TextField{Name: "error_message", Max: 500})
 			changed = true
 		}
+		if c.Fields.GetByName("agent_id") == nil {
+			c.Fields.Add(&core.TextField{Name: "agent_id", Max: 50})
+			changed = true
+		}
 		if changed {
 			if err := app.Save(c); err != nil {
 				return fmt.Errorf("migrate claw_deployments collection: %w", err)
 			}
-			app.Logger().Info("Migrated claw_deployments collection (added subdomain, error_message)")
+			app.Logger().Info("Migrated claw_deployments collection")
 		}
 		return nil
 	}
@@ -1509,6 +1617,7 @@ func ensureClawDeploymentsCollection(app *pocketbase.PocketBase) error {
 		&core.TextField{Name: "url", Max: 200},
 		&core.NumberField{Name: "port"},
 		&core.TextField{Name: "error_message", Max: 500},
+		&core.TextField{Name: "agent_id", Max: 50},
 		&core.AutodateField{Name: "created", OnCreate: true},
 	)
 	c.AddIndex("idx_claw_user", false, "user_id", "")

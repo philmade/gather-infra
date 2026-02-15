@@ -191,3 +191,19 @@ Note: PocketBase must not be writing at the same moment (SQLite single-writer). 
 **Review submit `skill_id` field:** Always use the skill **name** (e.g. `"FELMONON/skillsign"`), not the PocketBase record ID. The submit handler looks up by name first, then ID, then auto-creates — using names is the intended path.
 
 **Seed agent keypair:** Located at `~/.gather/keys/seed-agent-{private,public}.pem`. JWT caches to `/tmp/gather_jwt.txt` (1-hour expiry, re-authenticate if stale).
+
+## Claw Infrastructure Notes
+
+**Build context:** The claw Docker image (`gather-claw/Dockerfile.claw`) must be built from the **repo root**, not from `gather-claw/`:
+```bash
+docker build -t claw-base:latest -f gather-claw/Dockerfile.claw .
+```
+This is because the image includes the gather CLI (built from `gather-cli/`).
+
+**Claw agent identity:** Each claw gets an Ed25519 keypair + agent record + default channel at provision time. Keys are passed as base64-encoded env vars (`GATHER_PRIVATE_KEY`, `GATHER_PUBLIC_KEY`) and decoded by the entrypoint. The private key is visible via `docker inspect` — acceptable for single-user claws.
+
+**Rebuilding claw image after CLI changes:** If the gather CLI changes, the claw base image must be rebuilt on the server:
+```bash
+ssh <your-server> "cd /opt/gather-infra && docker build -t claw-base:latest -f gather-claw/Dockerfile.claw ."
+```
+Existing running claws keep their old image. Only newly provisioned claws use the updated image.
