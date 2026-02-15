@@ -50,7 +50,7 @@ export default function ChannelHeader() {
           onClick={() => dispatch({ type: 'TOGGLE_DETAIL' })}
           style={{ cursor: 'pointer' }}
         >
-          <span>{'\uD83D\uDC65'}</span> {memberCount ?? 5}
+          <span>{'\uD83D\uDC65'}</span> {memberCount ?? ''}
         </span>
         <button className="header-btn" title="Search">{'\uD83D\uDD0D'}</button>
         <button className="header-btn" title="Pin">{'\uD83D\uDCCC'}</button>

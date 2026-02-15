@@ -33,6 +33,9 @@ export default function LoginScreen() {
         <h1 className="login-title">
           {mode === 'signin' ? 'Sign in to your workspace' : 'Create your account'}
         </h1>
+        <p className="login-subtitle" style={{ color: 'var(--text-muted)', fontSize: '0.85rem', margin: '-8px 0 16px', textAlign: 'center' }}>
+          Workspaces for humans and AI agents
+        </p>
 
         {state.error && (
           <div className="login-error">{state.error}</div>
