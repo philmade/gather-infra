@@ -1,5 +1,7 @@
+import { useEffect, useState } from 'react'
 import { useWorkspace } from '../../context/WorkspaceContext'
 import { useChat } from '../../context/ChatContext'
+import { pb } from '../../lib/pocketbase'
 
 const avatarColors = [
   '#e91e63', '#9c27b0', '#673ab7', '#3f51b5', '#2196f3',
@@ -12,13 +14,56 @@ function avatarColor(id: string) {
   return avatarColors[Math.abs(hash) % avatarColors.length]
 }
 
+interface ClawDeployment {
+  id: string
+  name: string
+  status: string
+  claw_type: string
+}
+
+const statusLabel: Record<string, string> = {
+  queued: 'Queued',
+  provisioning: 'Provisioning...',
+  running: 'Running',
+  stopped: 'Stopped',
+  failed: 'Failed',
+}
+
+const statusClass: Record<string, string> = {
+  queued: 'status-idle',
+  provisioning: 'status-idle',
+  running: 'status-running',
+  stopped: 'status-stopped',
+  failed: 'status-stopped',
+}
+
 export default function Participants() {
   const { dispatch } = useWorkspace()
   const { getMembers, myUserId } = useChat()
+  const [deployedClaws, setDeployedClaws] = useState<ClawDeployment[]>([])
+
+  // Fetch user's claw deployments
+  useEffect(() => {
+    async function fetchClaws() {
+      try {
+        const resp = await fetch(pb.baseURL + '/api/claws', {
+          headers: { Authorization: `Bearer ${pb.authStore.token}` },
+        })
+        if (resp.ok) {
+          const data = await resp.json()
+          setDeployedClaws(data.claws || [])
+        }
+      } catch {
+        // Silently fail — claws list is not critical
+      }
+    }
+    fetchClaws()
+  }, [])
 
   const members = getMembers()
   const humans = members.filter(m => !m.isBot)
   const bots = members.filter(m => m.isBot)
+  const totalClaws = bots.length + deployedClaws.length
 
   return (
     <div>
@@ -45,7 +90,7 @@ export default function Participants() {
       </div>
 
       <div className="participants-section">
-        <div className="participants-section-label">Claws &mdash; {bots.length}</div>
+        <div className="participants-section-label">Claws &mdash; {totalClaws}</div>
         {bots.map(m => (
           <div key={m.id} className="agent-item">
             <div className="agent-avatar">{'\uD83E\uDD16'}</div>
@@ -57,27 +102,55 @@ export default function Participants() {
             </div>
           </div>
         ))}
-        {/* Example claw — shows what a deployed agent looks like */}
-        <div className="agent-item" style={{ opacity: 0.45, pointerEvents: 'none' }}>
-          <div className="agent-avatar">{'\uD83E\uDD16'}</div>
-          <div className="agent-info">
-            <div className="agent-name">
-              ResearchClaw
-              <span style={{
-                fontSize: '0.6rem',
-                background: 'var(--bg-tertiary)',
-                color: 'var(--text-muted)',
-                padding: '1px 5px',
-                borderRadius: '3px',
-                marginLeft: '6px',
-                fontWeight: 500,
-              }}>EXAMPLE</span>
-            </div>
-            <div className="agent-status status-stopped">
-              <span className="status-dot" /> Not deployed
+        {deployedClaws.map(claw => (
+          <div key={claw.id} className="agent-item">
+            <div className="agent-avatar">{'\uD83E\uDD16'}</div>
+            <div className="agent-info">
+              <div className="agent-name">
+                {claw.name}
+                {claw.status === 'queued' && (
+                  <span style={{
+                    fontSize: '0.6rem',
+                    background: 'var(--accent)',
+                    color: '#fff',
+                    padding: '1px 5px',
+                    borderRadius: '3px',
+                    marginLeft: '6px',
+                    fontWeight: 500,
+                  }}>BETA</span>
+                )}
+              </div>
+              <div className={`agent-status ${statusClass[claw.status] || 'status-idle'}`}>
+                <span className="status-dot" /> {statusLabel[claw.status] || claw.status}
+              </div>
             </div>
           </div>
-        </div>
+        ))}
+        {totalClaws === 0 && (
+          <>
+            {/* Example claw — shows what a deployed agent looks like */}
+            <div className="agent-item" style={{ opacity: 0.45, pointerEvents: 'none' }}>
+              <div className="agent-avatar">{'\uD83E\uDD16'}</div>
+              <div className="agent-info">
+                <div className="agent-name">
+                  ResearchClaw
+                  <span style={{
+                    fontSize: '0.6rem',
+                    background: 'var(--bg-tertiary)',
+                    color: 'var(--text-muted)',
+                    padding: '1px 5px',
+                    borderRadius: '3px',
+                    marginLeft: '6px',
+                    fontWeight: 500,
+                  }}>EXAMPLE</span>
+                </div>
+                <div className="agent-status status-stopped">
+                  <span className="status-dot" /> Not deployed
+                </div>
+              </div>
+            </div>
+          </>
+        )}
         <button
           className="deploy-agent-btn"
           onClick={() => dispatch({ type: 'OPEN_DEPLOY' })}

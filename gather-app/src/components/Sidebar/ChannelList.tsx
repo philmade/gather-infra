@@ -60,6 +60,7 @@ export default function ChannelList() {
               key={ch.topic}
               className={`sidebar-item ${isActive ? 'active' : ''} ${hasUnread ? 'has-unread' : ''}`}
               onClick={() => {
+                dispatch({ type: 'SET_MODE', mode: 'workspace' })
                 dispatch({ type: 'SET_CHANNEL', channel: ch.topic })
                 selectTopic(ch.topic)
               }}
@@ -118,7 +119,10 @@ export default function ChannelList() {
           <div
             key={ch.id}
             className={`sidebar-item ${isActive ? 'active' : ''}`}
-            onClick={() => dispatch({ type: 'SET_CHANNEL', channel: ch.id })}
+            onClick={() => {
+              dispatch({ type: 'SET_MODE', mode: 'workspace' })
+              dispatch({ type: 'SET_CHANNEL', channel: ch.id })
+            }}
           >
             <span className="channel-hash">#</span>
             <span className="item-name">{ch.name}</span>

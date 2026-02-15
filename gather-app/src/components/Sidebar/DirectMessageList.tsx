@@ -22,6 +22,7 @@ export default function DirectMessageList() {
               key={dm.topic}
               className={`sidebar-item ${isActive ? 'active' : ''}`}
               onClick={() => {
+                dispatch({ type: 'SET_MODE', mode: 'workspace' })
                 dispatch({ type: 'SET_CHANNEL', channel: dm.topic })
                 selectTopic(dm.topic)
               }}
@@ -51,7 +52,10 @@ export default function DirectMessageList() {
         <div
           key={dm.id}
           className={`sidebar-item ${state.activeChannel === dm.id ? 'active' : ''}`}
-          onClick={() => dispatch({ type: 'SET_CHANNEL', channel: dm.id })}
+          onClick={() => {
+            dispatch({ type: 'SET_MODE', mode: 'workspace' })
+            dispatch({ type: 'SET_CHANNEL', channel: dm.id })
+          }}
         >
           <div className={`dm-avatar ${dm.avatarClass}`}>
             {dm.avatarLetter}
