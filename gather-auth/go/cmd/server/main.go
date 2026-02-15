@@ -77,21 +77,6 @@ func main() {
 			}
 		}()
 
-		// --- Claw reverse proxy (*.claw.gather.is) ---
-		// Must be first — intercepts claw subdomain requests before any route matching.
-		e.Router.BindFunc(func(re *core.RequestEvent) error {
-			host := re.Request.Host
-			// Strip port if present (e.g. local dev)
-			if idx := strings.LastIndex(host, ":"); idx > 0 {
-				host = host[:idx]
-			}
-			if strings.HasSuffix(host, ".claw.gather.is") {
-				subdomain := strings.TrimSuffix(host, ".claw.gather.is")
-				return proxyToClawContainer(app, re, subdomain)
-			}
-			return re.Next()
-		})
-
 		// --- Huma API (OpenAPI docs + typed handlers) ---
 
 		mux := http.NewServeMux()
@@ -189,6 +174,19 @@ func main() {
 		e.Router.POST("/api/designs/upload", func(re *core.RequestEvent) error {
 			return handleDesignUpload(app, re, jwtKey)
 		})
+
+		// --- Claw terminal proxy (path-based, PocketBase auth) ---
+		// Redirect /c/{name} → /c/{name}/ (trailing slash required for relative URLs)
+		e.Router.Any("/c/{name}", func(re *core.RequestEvent) error {
+			name := re.Request.PathValue("name")
+			http.Redirect(re.Response, re.Request, "/c/"+name+"/", http.StatusMovedPermanently)
+			return nil
+		})
+
+		// Proxy /c/{name}/{path...} → container:7681/{path}
+		e.Router.Any("/c/{name}/{path...}", func(re *core.RequestEvent) error {
+			return handleClawProxy(app, re)
+		}).Bind(apis.RequireAuth())
 
 		return e.Next()
 	})
@@ -1309,25 +1307,33 @@ func ensureWaitlistCollection(app *pocketbase.PocketBase) error {
 }
 
 // =============================================================================
-// Claw reverse proxy
+// Claw terminal proxy (path-based)
 // =============================================================================
 
-func proxyToClawContainer(app *pocketbase.PocketBase, re *core.RequestEvent, subdomain string) error {
-	// Look up claw by subdomain
+func handleClawProxy(app *pocketbase.PocketBase, re *core.RequestEvent) error {
+	info, _ := re.RequestInfo()
+	if info.Auth == nil {
+		return apis.NewUnauthorizedError("Authentication required", nil)
+	}
+	userID := info.Auth.Id
+
+	name := re.Request.PathValue("name")
+	remainder := re.Request.PathValue("path")
+
 	records, err := app.FindRecordsByFilter("claw_deployments",
 		"subdomain = {:sub}", "", 1, 0,
-		map[string]any{"sub": subdomain})
+		map[string]any{"sub": name})
 	if err != nil || len(records) == 0 {
-		re.Response.WriteHeader(http.StatusNotFound)
-		re.Response.Write([]byte("Claw not found"))
-		return nil
+		return apis.NewNotFoundError("Claw not found", nil)
 	}
 
 	record := records[0]
-	status := record.GetString("status")
-	if status != "running" {
+	if record.GetString("user_id") != userID {
+		return apis.NewNotFoundError("Claw not found", nil)
+	}
+	if record.GetString("status") != "running" {
 		re.Response.WriteHeader(http.StatusServiceUnavailable)
-		re.Response.Write([]byte(fmt.Sprintf("Claw is %s, not running", status)))
+		re.Response.Write([]byte("Claw is not running"))
 		return nil
 	}
 
@@ -1338,15 +1344,10 @@ func proxyToClawContainer(app *pocketbase.PocketBase, re *core.RequestEvent, sub
 		Director: func(req *http.Request) {
 			req.URL.Scheme = target.Scheme
 			req.URL.Host = target.Host
-			req.URL.Path = re.Request.URL.Path
+			req.URL.Path = "/" + remainder
 			req.URL.RawQuery = re.Request.URL.RawQuery
 			req.Host = target.Host
 		},
-	}
-
-	// Forward WebSocket upgrade headers
-	if strings.EqualFold(re.Request.Header.Get("Upgrade"), "websocket") {
-		re.Response.Header().Set("Connection", "Upgrade")
 	}
 
 	proxy.ServeHTTP(re.Response, re.Request)
@@ -1437,7 +1438,7 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 	}
 
 	record.Set("status", "running")
-	record.Set("url", fmt.Sprintf("https://%s.claw.gather.is", subdomain))
+	record.Set("url", fmt.Sprintf("https://app.gather.is/c/%s/", subdomain))
 	if err := app.Save(record); err != nil {
 		app.Logger().Error("Failed to save claw running status", "id", record.Id, "error", err)
 	} else {
