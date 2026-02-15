@@ -127,7 +127,7 @@ export default function AgentDetail() {
           <div className="webtop-preview-label">Workspace</div>
           <div
             className="webtop-thumbnail"
-            onClick={() => window.open(claw.url, '_blank')}
+            onClick={() => window.open(`${claw.url}?token=${pb.authStore.token}`, '_blank')}
             style={{ cursor: 'pointer' }}
           >
             <div className="preview-label">{'\uD83D\uDDA5'} Open Workspace</div>
@@ -146,7 +146,7 @@ export default function AgentDetail() {
         {claw.status === 'running' && claw.url && (
           <button
             className="btn btn-primary btn-sm"
-            onClick={() => window.open(claw.url, '_blank')}
+            onClick={() => window.open(`${claw.url}?token=${pb.authStore.token}`, '_blank')}
           >
             {'\uD83D\uDDA5'} Open
           </button>

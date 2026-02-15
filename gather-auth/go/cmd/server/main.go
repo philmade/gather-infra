@@ -186,7 +186,7 @@ func main() {
 		// Proxy /c/{name}/{path...} → container:7681/{path}
 		e.Router.Any("/c/{name}/{path...}", func(re *core.RequestEvent) error {
 			return handleClawProxy(app, re)
-		}).Bind(apis.RequireAuth())
+		})
 
 		return e.Next()
 	})
@@ -1311,11 +1311,36 @@ func ensureWaitlistCollection(app *pocketbase.PocketBase) error {
 // =============================================================================
 
 func handleClawProxy(app *pocketbase.PocketBase, re *core.RequestEvent) error {
+	// Auth: try PB cookie/header first, then ?token= query param
+	var userID string
 	info, _ := re.RequestInfo()
-	if info.Auth == nil {
+	if info.Auth != nil {
+		userID = info.Auth.Id
+	}
+
+	// Fallback: validate ?token= and set cookie for subsequent requests (WS, assets)
+	if userID == "" {
+		token := re.Request.URL.Query().Get("token")
+		if token != "" {
+			record, err := app.FindAuthRecordByToken(token, "auth")
+			if err == nil {
+				userID = record.Id
+				http.SetCookie(re.Response, &http.Cookie{
+					Name:     "pb_auth",
+					Value:    token,
+					Path:     "/c/",
+					HttpOnly: true,
+					Secure:   true,
+					SameSite: http.SameSiteLaxMode,
+					MaxAge:   3600,
+				})
+			}
+		}
+	}
+
+	if userID == "" {
 		return apis.NewUnauthorizedError("Authentication required", nil)
 	}
-	userID := info.Auth.Id
 
 	name := re.Request.PathValue("name")
 	remainder := re.Request.PathValue("path")
