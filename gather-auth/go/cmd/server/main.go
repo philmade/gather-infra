@@ -907,6 +907,8 @@ func registerTinodeHooks(app *pocketbase.PocketBase, tinodeAddr, apiKey string) 
 		}
 
 		go func() {
+			ctx := context.Background()
+
 			tc, err := tinode.NewClient(tinodeAddr, apiKey, nil)
 			if err != nil {
 				app.Logger().Error("Failed to connect to Tinode for new user", "error", err)
@@ -914,12 +916,13 @@ func registerTinodeHooks(app *pocketbase.PocketBase, tinodeAddr, apiKey string) 
 			}
 			defer tc.Close()
 
-			tinodeUID, err := tc.EnsureUser(context.Background(), login, password, displayName)
+			tinodeUID, err := tc.EnsureUser(ctx, login, password, displayName)
 			if err != nil {
 				app.Logger().Error("Failed to create Tinode user", "pocketbase_id", pbID, "error", err)
-			} else {
-				app.Logger().Info("Created Tinode user for new registration", "pocketbase_id", pbID, "tinode_uid", tinodeUID)
+				return
 			}
+			app.Logger().Info("Created Tinode user for new registration", "pocketbase_id", pbID, "tinode_uid", tinodeUID)
+			// Workspace creation happens client-side during onboarding
 		}()
 
 		return e.Next()
