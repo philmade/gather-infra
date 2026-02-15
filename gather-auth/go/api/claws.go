@@ -104,6 +104,17 @@ type ProvisionResultOutput struct {
 	}
 }
 
+type DeleteClawInput struct {
+	Authorization string `header:"Authorization" doc:"Bearer PocketBase auth token" required:"true"`
+	ID            string `path:"id" doc:"Deployment ID"`
+}
+
+type DeleteClawOutput struct {
+	Body struct {
+		OK bool `json:"ok"`
+	}
+}
+
 // -----------------------------------------------------------------------------
 // Route registration
 // -----------------------------------------------------------------------------
@@ -221,6 +232,38 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 		}
 
 		out := &ProvisionResultOutput{}
+		out.Body.OK = true
+		return out, nil
+	})
+
+	// DELETE /api/claws/{id} — delete a deployment
+	huma.Register(api, huma.Operation{
+		OperationID: "delete-claw",
+		Method:      "DELETE",
+		Path:        "/api/claws/{id}",
+		Summary:     "Delete a Claw deployment",
+		Description: "Delete a claw deployment. Only the owning user can delete.",
+		Tags:        []string{"Claws"},
+	}, func(ctx context.Context, input *DeleteClawInput) (*DeleteClawOutput, error) {
+		userID, err := extractPBUserID(app, input.Authorization)
+		if err != nil {
+			return nil, huma.Error401Unauthorized("Authentication required")
+		}
+
+		record, err := app.FindRecordById("claw_deployments", input.ID)
+		if err != nil {
+			return nil, huma.Error404NotFound("Deployment not found")
+		}
+
+		if record.GetString("user_id") != userID {
+			return nil, huma.Error404NotFound("Deployment not found")
+		}
+
+		if err := app.Delete(record); err != nil {
+			return nil, huma.Error500InternalServerError("Failed to delete deployment")
+		}
+
+		out := &DeleteClawOutput{}
 		out.Body.OK = true
 		return out, nil
 	})

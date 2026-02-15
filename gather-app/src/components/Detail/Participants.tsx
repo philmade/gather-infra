@@ -105,23 +105,14 @@ export default function Participants() {
           </div>
         ))}
         {deployedClaws.map(claw => (
-          <div key={claw.id} className="agent-item">
+          <div
+            key={claw.id}
+            className="agent-item"
+            onClick={() => dispatch({ type: 'SHOW_AGENT_DETAIL', agentId: claw.id })}
+          >
             <div className="agent-avatar">{'\uD83E\uDD16'}</div>
             <div className="agent-info">
-              <div className="agent-name">
-                {claw.name}
-                {claw.status === 'queued' && (
-                  <span style={{
-                    fontSize: '0.6rem',
-                    background: 'var(--accent)',
-                    color: '#fff',
-                    padding: '1px 5px',
-                    borderRadius: '3px',
-                    marginLeft: '6px',
-                    fontWeight: 500,
-                  }}>BETA</span>
-                )}
-              </div>
+              <div className="agent-name">{claw.name}</div>
               <div className={`agent-status ${statusClass[claw.status] || 'status-idle'}`}>
                 <span className="status-dot" /> {statusLabel[claw.status] || claw.status}
               </div>
