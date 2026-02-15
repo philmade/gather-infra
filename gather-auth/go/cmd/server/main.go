@@ -1426,12 +1426,14 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 	}
 
 	// Create the container
+	clawDisplayName := record.GetString("name")
 	cmd := exec.Command("docker", "run", "-d",
 		"--name", containerName,
 		"--network", network,
 		"--restart", "unless-stopped",
 		"--memory", "512m",
 		"--cpus", "1",
+		"-e", fmt.Sprintf("CLAW_NAME=%s", clawDisplayName),
 		image,
 	)
 	output, err := cmd.CombinedOutput()

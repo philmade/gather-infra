@@ -1,7 +1,46 @@
 # Claw microcontainer — browser-accessible terminal for PicoClaw/RustClaw agents
-# ~15MB total. ttyd provides a web shell on port 7681.
-# The agent binary (PicoClaw/RustClaw) gets added as it matures.
-FROM alpine:3.19
-RUN apk add --no-cache ttyd bash curl
+# Includes Chawan terminal browser (~5MB) and claw-browse agent harness.
+# ttyd provides a web shell on port 7681.
+
+# === Stage 1: Build Chawan from source ===
+FROM alpine:3.21 AS builder
+
+RUN apk add --no-cache \
+    git make gcc musl-dev \
+    nim nimble \
+    pkgconf \
+    openssl-dev \
+    ncurses-dev \
+    curl-dev \
+    brotli-dev \
+    libssh2-dev
+
+WORKDIR /build
+RUN git clone --depth 1 --branch v0.3.3 https://git.sr.ht/~bptato/chawan && \
+    cd chawan && \
+    make TARGET=release && \
+    make install PREFIX=/usr/local DESTDIR=/chawan-install
+
+# === Stage 2: Runtime container ===
+FROM alpine:3.21
+
+# Runtime deps for Chawan + container basics + useful tools
+RUN apk add --no-cache \
+    ttyd bash curl ca-certificates jq git \
+    openssl ncurses-libs libcurl brotli-libs libssh2
+
+# Copy Chawan installation
+COPY --from=builder /chawan-install/usr/local/bin/cha /usr/local/bin/cha
+COPY --from=builder /chawan-install/usr/local/bin/mancha /usr/local/bin/mancha
+COPY --from=builder /chawan-install/usr/local/libexec/chawan/ /usr/local/libexec/chawan/
+
+# Install claw-browse harness + config
+COPY browser/claw-browse /usr/local/bin/claw-browse
+COPY browser/config/config.toml /etc/claw-browse/config.toml
+
+# Branded entrypoint
+COPY entrypoint.sh /usr/local/bin/claw-entrypoint
+RUN chmod +x /usr/local/bin/claw-entrypoint
+
 EXPOSE 7681
-CMD ["ttyd", "-W", "-p", "7681", "bash"]
+CMD ["ttyd", "-W", "-p", "7681", "-t", "fontSize=14", "-t", "titleFixed=Claw", "claw-entrypoint"]
