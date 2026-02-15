@@ -104,6 +104,27 @@ export class TinodeClient {
     await Promise.race([subsLoaded, new Promise(r => setTimeout(r, 2000))])
   }
 
+  /** Refresh contacts on an already-subscribed me topic (no re-subscribe) */
+  async refreshMe() {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const me = this.meTopic as any
+    if (!me?.isSubscribed?.()) {
+      return this.subscribeToMe()
+    }
+
+    const subsLoaded = new Promise<void>((resolve) => {
+      this.meTopic!.onSubsUpdated = () => {
+        this.onChannelsUpdated?.()
+        resolve()
+      }
+    })
+
+    const query = this.meTopic!.startMetaQuery().withSub().build()
+    me.getMeta(query)
+
+    await Promise.race([subsLoaded, new Promise(r => setTimeout(r, 2000))])
+  }
+
   getChannels(): ChannelInfo[] {
     if (!this.meTopic) return []
     const groups: ChannelInfo[] = []

@@ -193,7 +193,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const client = clientRef.current
     if (!client?.isLoggedIn) return
 
-    await client.subscribeToMe()
+    await client.refreshMe()
 
     const workspaces = client.getWorkspaces()
     const activeWorkspace = workspaces[0]?.topic ?? null
