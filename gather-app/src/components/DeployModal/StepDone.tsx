@@ -1,15 +1,28 @@
 import { useWorkspace } from '../../context/WorkspaceContext'
+import type { DeployConfig } from './DeployAgentModal'
 
-export default function StepDone() {
+interface Props {
+  config: DeployConfig
+  deploymentId: string | null
+}
+
+export default function StepDone({ config, deploymentId }: Props) {
   const { dispatch } = useWorkspace()
 
   return (
     <div className="deploy-success">
       <div className="success-icon" style={{ color: 'var(--green)' }}>{'\u2713'}</div>
-      <div className="success-text">DataClaw is live!</div>
-      <div className="success-subtext">Your agent is running and connected to the workspace.</div>
+      <div className="success-text">{config.name} is queued!</div>
+      <div className="success-subtext">
+        Your claw deployment has been created. Container provisioning will begin shortly.
+      </div>
+      {deploymentId && (
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 'var(--space-xs)' }}>
+          Deployment ID: {deploymentId}
+        </div>
+      )}
       <button className="btn btn-primary btn-sm" onClick={() => dispatch({ type: 'CLOSE_DEPLOY' })}>
-        Go to Agent
+        Done
       </button>
     </div>
   )

@@ -99,6 +99,7 @@ func main() {
 		gatherapi.RegisterBalanceRoutes(api, app, jwtKey)
 		gatherapi.RegisterAdminRoutes(api, app)
 		gatherapi.RegisterWaitlistRoutes(api, app)
+		gatherapi.RegisterClawRoutes(api, app)
 
 		tinodeWsURL := os.Getenv("TINODE_WS_URL")
 		if tinodeWsURL == "" {
@@ -147,6 +148,8 @@ func main() {
 			"/api/channels/{path...}",
 			"/api/chat/credentials",
 			"/api/waitlist",
+			"/api/claws",
+			"/api/claws/{path...}",
 			"/discover",
 		} {
 			e.Router.Any(p, delegate)
@@ -270,6 +273,9 @@ func ensureCollections(app *pocketbase.PocketBase) error {
 		return err
 	}
 	if err := ensureWaitlistCollection(app); err != nil {
+		return err
+	}
+	if err := ensureClawDeploymentsCollection(app); err != nil {
 		return err
 	}
 	return nil
@@ -1278,6 +1284,34 @@ func ensureWaitlistCollection(app *pocketbase.PocketBase) error {
 		return fmt.Errorf("create waitlist collection: %w", err)
 	}
 	app.Logger().Info("Created waitlist collection")
+	return nil
+}
+
+func ensureClawDeploymentsCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("claw_deployments")
+	if err == nil {
+		return nil
+	}
+
+	c := core.NewBaseCollection("claw_deployments")
+	c.Fields.Add(
+		&core.TextField{Name: "name", Required: true, Max: 50},
+		&core.TextField{Name: "status", Required: true, Max: 20},
+		&core.TextField{Name: "instructions", Max: 2000},
+		&core.TextField{Name: "github_repo", Max: 200},
+		&core.TextField{Name: "claw_type", Max: 50},
+		&core.TextField{Name: "user_id", Required: true, Max: 50},
+		&core.TextField{Name: "container_id", Max: 100},
+		&core.TextField{Name: "url", Max: 200},
+		&core.NumberField{Name: "port"},
+		&core.AutodateField{Name: "created", OnCreate: true},
+	)
+	c.AddIndex("idx_claw_user", false, "user_id", "")
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create claw_deployments collection: %w", err)
+	}
+	app.Logger().Info("Created claw_deployments collection")
 	return nil
 }
 
