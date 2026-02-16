@@ -1557,8 +1557,20 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 	secrets, _ := app.FindRecordsByFilter("claw_secrets",
 		"user_id = {:uid}", "", 100, 0,
 		map[string]any{"uid": userID})
+	app.Logger().Info("vault lookup",
+		"claw_id", record.Id,
+		"claw_name", clawDisplayName,
+		"user_id", userID,
+		"secrets_found", len(secrets))
 	for _, s := range secrets {
-		if gatherapi.ScopeMatchesClaw(s.Get("scope"), record.Id) {
+		rawScope := s.Get("scope")
+		matches := gatherapi.ScopeMatchesClaw(rawScope, record.Id)
+		app.Logger().Info("vault secret check",
+			"key", s.GetString("key"),
+			"scope_raw", fmt.Sprintf("%v (%T)", rawScope, rawScope),
+			"claw_id", record.Id,
+			"matches", matches)
+		if matches {
 			envMap[s.GetString("key")] = s.GetString("value")
 		}
 	}
