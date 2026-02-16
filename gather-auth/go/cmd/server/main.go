@@ -1323,6 +1323,18 @@ func ensureWaitlistCollection(app *pocketbase.PocketBase) error {
 // =============================================================================
 
 func handleClawProxy(app *pocketbase.PocketBase, re *core.RequestEvent) error {
+	name := re.Request.PathValue("name")
+	remainder := re.Request.PathValue("path")
+
+	// Look up claw first (before auth) so typos get 404, not 401
+	records, err := app.FindRecordsByFilter("claw_deployments",
+		"subdomain = {:sub}", "", 1, 0,
+		map[string]any{"sub": name})
+	if err != nil || len(records) == 0 {
+		return apis.NewNotFoundError("Claw not found", nil)
+	}
+	record := records[0]
+
 	// Auth: try PB cookie/header first, then ?token= query param
 	var userID string
 	info, _ := re.RequestInfo()
@@ -1334,9 +1346,9 @@ func handleClawProxy(app *pocketbase.PocketBase, re *core.RequestEvent) error {
 	if userID == "" {
 		token := re.Request.URL.Query().Get("token")
 		if token != "" {
-			record, err := app.FindAuthRecordByToken(token, "auth")
+			authRecord, err := app.FindAuthRecordByToken(token, "auth")
 			if err == nil {
-				userID = record.Id
+				userID = authRecord.Id
 				http.SetCookie(re.Response, &http.Cookie{
 					Name:     "pb_auth",
 					Value:    token,
@@ -1351,26 +1363,26 @@ func handleClawProxy(app *pocketbase.PocketBase, re *core.RequestEvent) error {
 	}
 
 	if userID == "" {
+		// Browser-friendly redirect: send to app login with return URL
+		accept := re.Request.Header.Get("Accept")
+		if strings.Contains(accept, "text/html") {
+			redirectURL := fmt.Sprintf("https://app.gather.is/?redirect=/c/%s/", name)
+			http.Redirect(re.Response, re.Request, redirectURL, http.StatusFound)
+			return nil
+		}
 		return apis.NewUnauthorizedError("Authentication required", nil)
 	}
 
-	name := re.Request.PathValue("name")
-	remainder := re.Request.PathValue("path")
-
-	records, err := app.FindRecordsByFilter("claw_deployments",
-		"subdomain = {:sub}", "", 1, 0,
-		map[string]any{"sub": name})
-	if err != nil || len(records) == 0 {
-		return apis.NewNotFoundError("Claw not found", nil)
-	}
-
-	record := records[0]
 	if record.GetString("user_id") != userID {
 		return apis.NewNotFoundError("Claw not found", nil)
 	}
-	if record.GetString("status") != "running" {
+
+	status := record.GetString("status")
+	if status != "running" {
+		re.Response.Header().Set("Content-Type", "application/json")
 		re.Response.WriteHeader(http.StatusServiceUnavailable)
-		re.Response.Write([]byte("Claw is not running"))
+		re.Response.Write([]byte(fmt.Sprintf(
+			`{"status":503,"message":"Claw is not running","claw_status":"%s"}`, status)))
 		return nil
 	}
 
