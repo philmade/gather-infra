@@ -1,5 +1,14 @@
 import { useState, useEffect } from 'react'
-import { listVault, createVaultEntry, updateVaultEntry, deleteVaultEntry, listClaws, type VaultEntry, type ClawDeployment } from '../../lib/api'
+import { pb } from '../../lib/pocketbase'
+import { listClaws, type ClawDeployment } from '../../lib/api'
+
+interface VaultRecord {
+  id: string
+  key: string
+  value: string
+  scope: string[]
+  user_id: string
+}
 
 const SUGGESTED_VARS = [
   { key: 'CLAW_LLM_API_KEY', desc: 'API key for your LLM provider (OpenAI, Anthropic, Z.AI, etc.)' },
@@ -9,8 +18,13 @@ const SUGGESTED_VARS = [
   { key: 'GITHUB_TOKEN', desc: 'GitHub personal access token for repo access' },
 ]
 
+function maskValue(v: string): string {
+  if (!v || v.length < 8) return '****'
+  return v.slice(0, 4) + '****' + v.slice(-4)
+}
+
 export default function AuthVault() {
-  const [entries, setEntries] = useState<VaultEntry[]>([])
+  const [entries, setEntries] = useState<VaultRecord[]>([])
   const [claws, setClaws] = useState<ClawDeployment[]>([])
   const [showForm, setShowForm] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
@@ -23,8 +37,10 @@ export default function AuthVault() {
 
   async function loadVault() {
     try {
-      const data = await listVault()
-      setEntries(data.entries || [])
+      const records = await pb.collection('claw_secrets').getFullList<VaultRecord>({
+        sort: '-created',
+      })
+      setEntries(records)
     } catch (e: any) {
       console.error('Vault load failed:', e)
       setError('Failed to load vault: ' + e.message)
@@ -62,7 +78,7 @@ export default function AuthVault() {
     setError('')
   }
 
-  function startEdit(entry: VaultEntry) {
+  function startEdit(entry: VaultRecord) {
     setEditingId(entry.id)
     setFormKey(entry.key)
     setFormValue('')
@@ -75,18 +91,29 @@ export default function AuthVault() {
     setError('')
     setSaving(true)
     try {
+      const userId = pb.authStore.record?.id
+      if (!userId) {
+        setError('Not authenticated')
+        setSaving(false)
+        return
+      }
+
       if (editingId) {
-        const body: { key?: string; value?: string; scope?: string[] } = { scope: formScope }
-        body.key = formKey
-        if (formValue) body.value = formValue
-        await updateVaultEntry(editingId, body)
+        const data: Record<string, any> = { key: formKey, scope: formScope }
+        if (formValue) data.value = formValue
+        await pb.collection('claw_secrets').update(editingId, data)
       } else {
         if (!formKey || !formValue) {
           setError('Key and value are required')
           setSaving(false)
           return
         }
-        await createVaultEntry({ key: formKey, value: formValue, scope: formScope })
+        await pb.collection('claw_secrets').create({
+          user_id: userId,
+          key: formKey,
+          value: formValue,
+          scope: formScope,
+        })
       }
       resetForm()
       await loadVault()
@@ -101,7 +128,7 @@ export default function AuthVault() {
   async function handleDelete(id: string) {
     setError('')
     try {
-      await deleteVaultEntry(id)
+      await pb.collection('claw_secrets').delete(id)
       await loadVault()
     } catch (e: any) {
       console.error('Vault delete failed:', e)
@@ -161,7 +188,7 @@ export default function AuthVault() {
         {entries.map(entry => (
           <div key={entry.id} className="vault-row">
             <span className="vault-key">{entry.key}</span>
-            <span className="vault-value">{entry.masked_value}</span>
+            <span className="vault-value">{maskValue(entry.value)}</span>
             <div className="vault-scope">
               <span className="badge badge-purple">{scopeLabel(entry.scope)}</span>
             </div>

@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -150,63 +149,6 @@ type SendClawMsgInput struct {
 type SendClawMsgOutput struct {
 	Body struct {
 		Message ClawMessage `json:"message"`
-	}
-}
-
-// Vault types
-
-type VaultEntry struct {
-	ID          string   `json:"id"`
-	Key         string   `json:"key"`
-	MaskedValue string   `json:"masked_value"`
-	Scope       []string `json:"scope"`
-}
-
-type ListVaultInput struct {
-	Authorization string `header:"Authorization" doc:"Bearer PocketBase auth token" required:"true"`
-}
-
-type ListVaultOutput struct {
-	Body struct {
-		Entries []VaultEntry `json:"entries"`
-	}
-}
-
-type CreateVaultInput struct {
-	Authorization string `header:"Authorization" doc:"Bearer PocketBase auth token" required:"true"`
-	Body          struct {
-		Key   string   `json:"key" doc:"Env var name" minLength:"1" maxLength:"100"`
-		Value string   `json:"value" doc:"Secret value" minLength:"1" maxLength:"2000"`
-		Scope []string `json:"scope" doc:"Claw IDs this applies to, empty = all claws"`
-	}
-}
-
-type CreateVaultOutput struct {
-	Body VaultEntry
-}
-
-type UpdateVaultInput struct {
-	Authorization string `header:"Authorization" doc:"Bearer PocketBase auth token" required:"true"`
-	ID            string `path:"id" doc:"Vault entry ID"`
-	Body          struct {
-		Key   *string  `json:"key,omitempty" doc:"Env var name" maxLength:"100"`
-		Value *string  `json:"value,omitempty" doc:"Secret value" maxLength:"2000"`
-		Scope []string `json:"scope,omitempty" doc:"Claw IDs this applies to"`
-	}
-}
-
-type UpdateVaultOutput struct {
-	Body VaultEntry
-}
-
-type DeleteVaultInput struct {
-	Authorization string `header:"Authorization" doc:"Bearer PocketBase auth token" required:"true"`
-	ID            string `path:"id" doc:"Vault entry ID"`
-}
-
-type DeleteVaultOutput struct {
-	Body struct {
-		OK bool `json:"ok"`
 	}
 }
 
@@ -533,157 +475,6 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 	// =========================================================================
 	// Vault endpoints — per-user secrets for claw env injection
 	// =========================================================================
-
-	// GET /api/vault — list user's vault entries (masked values)
-	huma.Register(api, huma.Operation{
-		OperationID: "list-vault",
-		Method:      "GET",
-		Path:        "/api/vault",
-		Summary:     "List vault entries",
-		Description: "List all vault entries for the authenticated user. Values are masked.",
-		Tags:        []string{"Vault"},
-	}, func(ctx context.Context, input *ListVaultInput) (*ListVaultOutput, error) {
-		userID, err := extractPBUserID(app, input.Authorization)
-		if err != nil {
-			return nil, huma.Error401Unauthorized("Authentication required")
-		}
-
-		records, err := app.FindRecordsByFilter("claw_secrets",
-			"user_id = {:uid}", "-created", 100, 0,
-			map[string]any{"uid": userID})
-		if err != nil {
-			records = nil
-		}
-
-		out := &ListVaultOutput{}
-		out.Body.Entries = make([]VaultEntry, 0, len(records))
-		for _, r := range records {
-			out.Body.Entries = append(out.Body.Entries, recordToVaultEntry(r))
-		}
-		return out, nil
-	})
-
-	// POST /api/vault — create a vault entry
-	huma.Register(api, huma.Operation{
-		OperationID: "create-vault-entry",
-		Method:      "POST",
-		Path:        "/api/vault",
-		Summary:     "Create vault entry",
-		Description: "Store a new secret. Key must be unique per user.",
-		Tags:        []string{"Vault"},
-	}, func(ctx context.Context, input *CreateVaultInput) (*CreateVaultOutput, error) {
-		userID, err := extractPBUserID(app, input.Authorization)
-		if err != nil {
-			return nil, huma.Error401Unauthorized("Authentication required")
-		}
-
-		key := strings.TrimSpace(input.Body.Key)
-		if key == "" {
-			return nil, huma.Error422UnprocessableEntity("Key is required")
-		}
-
-		col, err := app.FindCollectionByNameOrId("claw_secrets")
-		if err != nil {
-			return nil, huma.Error500InternalServerError("claw_secrets collection not found")
-		}
-
-		record := core.NewRecord(col)
-		record.Set("user_id", userID)
-		record.Set("key", key)
-		record.Set("value", input.Body.Value)
-		record.Set("scope", input.Body.Scope)
-
-		if err := app.Save(record); err != nil {
-			return nil, huma.Error500InternalServerError("Failed to create vault entry")
-		}
-
-		out := &CreateVaultOutput{}
-		out.Body = recordToVaultEntry(record)
-		return out, nil
-	})
-
-	// PUT /api/vault/{id} — update a vault entry
-	huma.Register(api, huma.Operation{
-		OperationID: "update-vault-entry",
-		Method:      "PUT",
-		Path:        "/api/vault/{id}",
-		Summary:     "Update vault entry",
-		Description: "Update an existing vault entry. Only the owner can update.",
-		Tags:        []string{"Vault"},
-	}, func(ctx context.Context, input *UpdateVaultInput) (*UpdateVaultOutput, error) {
-		log.Printf("[vault-update] ID=%s Key=%v Scope=%v", input.ID, input.Body.Key, input.Body.Scope)
-
-		userID, err := extractPBUserID(app, input.Authorization)
-		if err != nil {
-			log.Printf("[vault-update] auth failed: %v", err)
-			return nil, huma.Error401Unauthorized("Authentication required")
-		}
-
-		record, err := app.FindRecordById("claw_secrets", input.ID)
-		if err != nil {
-			log.Printf("[vault-update] record not found: %v", err)
-			return nil, huma.Error404NotFound("Vault entry not found")
-		}
-		if record.GetString("user_id") != userID {
-			log.Printf("[vault-update] ownership mismatch: record=%s, user=%s", record.GetString("user_id"), userID)
-			return nil, huma.Error404NotFound("Vault entry not found")
-		}
-
-		if input.Body.Key != nil {
-			k := strings.TrimSpace(*input.Body.Key)
-			if k == "" {
-				return nil, huma.Error422UnprocessableEntity("Key cannot be empty")
-			}
-			record.Set("key", k)
-		}
-		if input.Body.Value != nil {
-			record.Set("value", *input.Body.Value)
-		}
-		if input.Body.Scope != nil {
-			log.Printf("[vault-update] setting scope to: %v", input.Body.Scope)
-			record.Set("scope", input.Body.Scope)
-		} else {
-			log.Printf("[vault-update] scope is nil in request body")
-		}
-
-		if err := app.Save(record); err != nil {
-			log.Printf("[vault-update] save failed: %v", err)
-			return nil, huma.Error500InternalServerError("Failed to update vault entry")
-		}
-
-		log.Printf("[vault-update] saved OK, scope in record: %v", record.Get("scope"))
-		out := &UpdateVaultOutput{}
-		out.Body = recordToVaultEntry(record)
-		return out, nil
-	})
-
-	// DELETE /api/vault/{id} — delete a vault entry
-	huma.Register(api, huma.Operation{
-		OperationID: "delete-vault-entry",
-		Method:      "DELETE",
-		Path:        "/api/vault/{id}",
-		Summary:     "Delete vault entry",
-		Description: "Delete a vault entry. Only the owner can delete.",
-		Tags:        []string{"Vault"},
-	}, func(ctx context.Context, input *DeleteVaultInput) (*DeleteVaultOutput, error) {
-		userID, err := extractPBUserID(app, input.Authorization)
-		if err != nil {
-			return nil, huma.Error401Unauthorized("Authentication required")
-		}
-
-		record, err := app.FindRecordById("claw_secrets", input.ID)
-		if err != nil || record.GetString("user_id") != userID {
-			return nil, huma.Error404NotFound("Vault entry not found")
-		}
-
-		if err := app.Delete(record); err != nil {
-			return nil, huma.Error500InternalServerError("Failed to delete vault entry")
-		}
-
-		out := &DeleteVaultOutput{}
-		out.Body.OK = true
-		return out, nil
-	})
 }
 
 // extractPBUserID parses a PocketBase auth token and returns the user ID.
@@ -725,25 +516,6 @@ func findClawChannel(app *pocketbase.PocketBase, agentID string) (string, error)
 		return "", fmt.Errorf("no channel found for agent %s", agentID)
 	}
 	return members[0].GetString("channel_id"), nil
-}
-
-// recordToVaultEntry converts a PocketBase record to a VaultEntry with masked value.
-func recordToVaultEntry(r *core.Record) VaultEntry {
-	val := r.GetString("value")
-	return VaultEntry{
-		ID:          r.Id,
-		Key:         r.GetString("key"),
-		MaskedValue: maskValue(val),
-		Scope:       parseScope(r.Get("scope")),
-	}
-}
-
-// maskValue returns first 4 + **** + last 4 chars, or **** if < 8 chars.
-func maskValue(v string) string {
-	if len(v) < 8 {
-		return "****"
-	}
-	return v[:4] + "****" + v[len(v)-4:]
 }
 
 // parseScope extracts a string slice from a JSON scope field.

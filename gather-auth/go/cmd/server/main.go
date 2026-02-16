@@ -159,8 +159,6 @@ func main() {
 			"/api/waitlist",
 			"/api/claws",
 			"/api/claws/{path...}",
-			"/api/vault",
-			"/api/vault/{path...}",
 			"/discover",
 		} {
 			e.Router.Any(p, delegate)
@@ -1624,12 +1622,32 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 }
 
 func ensureClawSecretsCollection(app *pocketbase.PocketBase) error {
-	_, err := app.FindCollectionByNameOrId("claw_secrets")
+	ownerRule := "@request.auth.id = user_id"
+	authRule := "@request.auth.id != ''"
+
+	c, err := app.FindCollectionByNameOrId("claw_secrets")
 	if err == nil {
+		// Migration: ensure API rules are set
+		if c.ListRule == nil {
+			c.ListRule = &ownerRule
+			c.ViewRule = &ownerRule
+			c.CreateRule = &authRule
+			c.UpdateRule = &ownerRule
+			c.DeleteRule = &ownerRule
+			if err := app.Save(c); err != nil {
+				return fmt.Errorf("migrate claw_secrets rules: %w", err)
+			}
+			app.Logger().Info("Migrated claw_secrets API rules")
+		}
 		return nil
 	}
 
-	c := core.NewBaseCollection("claw_secrets")
+	c = core.NewBaseCollection("claw_secrets")
+	c.ListRule = &ownerRule
+	c.ViewRule = &ownerRule
+	c.CreateRule = &authRule
+	c.UpdateRule = &ownerRule
+	c.DeleteRule = &ownerRule
 	c.Fields.Add(
 		&core.TextField{Name: "user_id", Required: true, Max: 50},
 		&core.TextField{Name: "key", Required: true, Max: 100},

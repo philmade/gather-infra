@@ -127,33 +127,4 @@ export function sendClawMessage(clawId: string, body: string) {
   return apiPost<{ message: ClawMessage }>(`/api/claws/${encodeURIComponent(clawId)}/messages`, { body })
 }
 
-// Vault
-export interface VaultEntry {
-  id: string
-  key: string
-  masked_value: string
-  scope: string[]
-}
-
-export function listVault() {
-  return apiFetch<{ entries: VaultEntry[] }>('/api/vault')
-}
-
-export function createVaultEntry(body: { key: string; value: string; scope: string[] }) {
-  return apiPost<VaultEntry>('/api/vault', body)
-}
-
-export function updateVaultEntry(id: string, body: { key?: string; value?: string; scope?: string[] }) {
-  return apiFetch<VaultEntry>(`/api/vault/${encodeURIComponent(id)}`, {
-    method: 'PUT',
-    body: JSON.stringify(body),
-  })
-}
-
-export function deleteVaultEntry(id: string) {
-  return apiFetch<{ ok: boolean }>(`/api/vault/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-  })
-}
-
 export { apiFetch, apiPost }
