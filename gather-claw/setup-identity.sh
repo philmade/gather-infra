@@ -27,7 +27,7 @@ cat > "$PICOCLAW_DIR/config.json" << PCONF
 {
   "agents": {
     "defaults": {
-      "provider": "anthropic",
+      "provider": "openai",
       "model": "$LLM_MODEL",
       "max_tokens": 4096,
       "temperature": 0.7
@@ -42,7 +42,7 @@ cat > "$PICOCLAW_DIR/config.json" << PCONF
     }
   },
   "providers": {
-    "anthropic": {
+    "openai": {
       "api_key": "$LLM_API_KEY",
       "api_base": "$LLM_API_URL"
     }
