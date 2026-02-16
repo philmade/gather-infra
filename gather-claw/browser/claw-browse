@@ -68,12 +68,12 @@ cmd_fetch() {
 
     raw=$(run_cha "$url") || die "failed to load $url"
 
-    # Extract title from first non-empty line (cha renders title prominently)
-    title=$(echo "$raw" | head -5 | sed 's/^[[:space:]]*//' | grep -v '^$' | head -1)
+    # Separate content from link references (URLs at bottom: [N] https://...)
+    content=$(echo "$raw" | sed '/^\[1\] [a-z]*:/,$d')
+    links=$(echo "$raw" | sed -n '/^\[1\] [a-z]*:/,$p')
 
-    # Separate content from link references
-    content=$(echo "$raw" | sed '/^\[1\] /,$d')
-    links=$(echo "$raw" | sed -n '/^\[1\] /,$p')
+    # Extract title from first non-empty content line
+    title=$(echo "$content" | head -5 | sed 's/^[[:space:]]*//' | sed 's/\[[0-9]*\]//g' | grep -v '^$' | head -1)
 
     echo "=== PAGE ==="
     echo "url: $url"
@@ -95,8 +95,8 @@ cmd_links() {
 
     raw=$(run_cha "$url") || die "failed to load $url"
 
-    # Extract link references from bottom of dump
-    echo "$raw" | sed -n '/^\[1\] /,$p'
+    # Extract link references from bottom of dump (URLs: [N] https://...)
+    echo "$raw" | sed -n '/^\[1\] [a-z]*:/,$p'
 }
 
 cmd_screenshot() {
@@ -128,7 +128,7 @@ cmd_interact() {
     if [ -n "$follow" ]; then
         # Fetch page, extract target URL for link N, then fetch that
         raw=$(run_cha "$url") || die "failed to load $url"
-        target=$(echo "$raw" | sed -n "s/^\[$follow\] //p")
+        target=$(echo "$raw" | sed -n "s/^\[$follow\] \([a-z]*:.*\)/\1/p")
         [ -z "$target" ] && die "link [$follow] not found on page"
         echo "following link [$follow] → $target"
         echo ""
