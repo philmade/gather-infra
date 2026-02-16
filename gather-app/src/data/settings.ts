@@ -1,9 +1,3 @@
-export interface VaultEntry {
-  key: string
-  maskedValue: string
-  scope: string[]
-}
-
 export interface ConnectedService {
   icon: string
   name: string
@@ -17,12 +11,6 @@ export interface NotificationSetting {
   description: string
   enabled: boolean
 }
-
-export const vaultEntries: VaultEntry[] = [
-  { key: 'GITHUB_TOKEN', maskedValue: 'ghp_****...3kF9', scope: ['BuyClaw', 'ReviewClaw'] },
-  { key: 'SHOPIFY_KEY', maskedValue: 'sk_****...x7Qm', scope: ['BuyClaw'] },
-  { key: 'OPENAI_API_KEY', maskedValue: 'sk-****...9pLz', scope: ['All Claws'] },
-]
 
 export const connectedServices: ConnectedService[] = [
   { icon: '\uD83D\uDC19', name: 'GitHub', status: 'Connected as @phill-acme', connected: true },

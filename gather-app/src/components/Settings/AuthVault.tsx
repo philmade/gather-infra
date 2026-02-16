@@ -1,15 +1,133 @@
-import { useState } from 'react'
-import { vaultEntries } from '../../data/settings'
+import { useState, useEffect } from 'react'
+import { listVault, createVaultEntry, updateVaultEntry, deleteVaultEntry, listClaws, type VaultEntry, type ClawDeployment } from '../../lib/api'
 
 export default function AuthVault() {
+  const [entries, setEntries] = useState<VaultEntry[]>([])
+  const [claws, setClaws] = useState<ClawDeployment[]>([])
   const [showForm, setShowForm] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [formKey, setFormKey] = useState('')
+  const [formValue, setFormValue] = useState('')
+  const [formScope, setFormScope] = useState<string[]>([])
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  async function loadVault() {
+    try {
+      const data = await listVault()
+      setEntries(data.entries || [])
+    } catch (e: any) {
+      console.error('Vault load failed:', e)
+      setError('Failed to load vault: ' + e.message)
+    }
+  }
+
+  async function loadClaws() {
+    try {
+      const data = await listClaws()
+      setClaws(data.claws || [])
+    } catch (e: any) {
+      console.error('Claws load failed:', e)
+    }
+  }
+
+  useEffect(() => {
+    Promise.all([loadVault(), loadClaws()]).finally(() => setLoading(false))
+  }, [])
+
+  function resetForm() {
+    setFormKey('')
+    setFormValue('')
+    setFormScope([])
+    setShowForm(false)
+    setEditingId(null)
+    setError('')
+  }
+
+  function startEdit(entry: VaultEntry) {
+    setEditingId(entry.id)
+    setFormKey(entry.key)
+    setFormValue('')
+    setFormScope(entry.scope || [])
+    setShowForm(true)
+    setError('')
+  }
+
+  async function handleSave() {
+    setError('')
+    setSaving(true)
+    try {
+      if (editingId) {
+        const body: { key?: string; value?: string; scope?: string[] } = { scope: formScope }
+        body.key = formKey
+        if (formValue) body.value = formValue
+        await updateVaultEntry(editingId, body)
+      } else {
+        if (!formKey || !formValue) {
+          setError('Key and value are required')
+          setSaving(false)
+          return
+        }
+        await createVaultEntry({ key: formKey, value: formValue, scope: formScope })
+      }
+      resetForm()
+      await loadVault()
+    } catch (e: any) {
+      console.error('Vault save failed:', e)
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleDelete(id: string) {
+    setError('')
+    try {
+      await deleteVaultEntry(id)
+      await loadVault()
+    } catch (e: any) {
+      console.error('Vault delete failed:', e)
+      setError(e.message)
+    }
+  }
+
+  function toggleScope(clawId: string) {
+    setFormScope(prev =>
+      prev.includes(clawId) ? prev.filter(s => s !== clawId) : [...prev, clawId]
+    )
+  }
+
+  function scopeLabel(scope: string[]) {
+    if (!scope || scope.length === 0) return 'All Claws'
+    return scope.map(id => {
+      const claw = claws.find(c => c.id === id)
+      return claw ? claw.name : id.slice(0, 8)
+    }).join(', ')
+  }
+
+  if (loading) return <div>Loading vault...</div>
 
   return (
     <div>
       <h2>Authentication Vault</h2>
       <p className="section-desc">
-        Store secrets that your Claws can access securely. Variables are encrypted at rest and only exposed to the agents you specify.
+        Store secrets that your Claws can access. Variables are injected as environment variables when a Claw is provisioned.
       </p>
+
+      {error && (
+        <div style={{
+          padding: '8px 12px',
+          marginBottom: '12px',
+          background: 'var(--color-error-bg, #fee)',
+          color: 'var(--color-error, #c33)',
+          borderRadius: '6px',
+          border: '1px solid var(--color-error-border, #fcc)',
+          fontSize: '0.875rem',
+        }}>
+          {error}
+        </div>
+      )}
 
       <div className="vault-table">
         <div className="vault-row vault-row-header">
@@ -18,25 +136,28 @@ export default function AuthVault() {
           <span>Scoped To</span>
           <span></span>
         </div>
-        {vaultEntries.map(entry => (
-          <div key={entry.key} className="vault-row">
+        {entries.map(entry => (
+          <div key={entry.id} className="vault-row">
             <span className="vault-key">{entry.key}</span>
-            <span className="vault-value">{entry.maskedValue}</span>
+            <span className="vault-value">{entry.masked_value}</span>
             <div className="vault-scope">
-              {entry.scope.map(s => (
-                <span key={s} className="badge badge-purple">{s}</span>
-              ))}
+              <span className="badge badge-purple">{scopeLabel(entry.scope)}</span>
             </div>
             <div className="vault-actions">
-              <button title="Edit">{'\u270E'}</button>
-              <button title="Delete">{'\uD83D\uDDD1'}</button>
+              <button title="Edit" onClick={() => startEdit(entry)}>{'\u270E'}</button>
+              <button title="Delete" onClick={() => handleDelete(entry.id)}>{'\uD83D\uDDD1'}</button>
             </div>
           </div>
         ))}
+        {entries.length === 0 && (
+          <div className="vault-row" style={{ opacity: 0.6 }}>
+            <span>No secrets stored yet</span>
+          </div>
+        )}
       </div>
 
       {!showForm && (
-        <button className="btn btn-secondary btn-sm" onClick={() => setShowForm(true)}>
+        <button className="btn btn-secondary btn-sm" onClick={() => { resetForm(); setShowForm(true) }}>
           + Add Variable
         </button>
       )}
@@ -45,23 +166,60 @@ export default function AuthVault() {
         <div className="vault-add-form active">
           <div className="form-group">
             <label className="form-label">Key</label>
-            <input type="text" className="form-input" placeholder="e.g., API_TOKEN" />
+            <input
+              type="text"
+              className="form-input"
+              placeholder="e.g., CLAW_LLM_API_KEY"
+              value={formKey}
+              onChange={e => setFormKey(e.target.value)}
+            />
           </div>
           <div className="form-group">
-            <label className="form-label">Value</label>
-            <input type="password" className="form-input" placeholder="Enter secret value" />
+            <label className="form-label">
+              Value {editingId ? '(leave blank to keep current)' : ''}
+            </label>
+            <input
+              type="password"
+              className="form-input"
+              placeholder="Enter secret value"
+              value={formValue}
+              onChange={e => setFormValue(e.target.value)}
+            />
           </div>
           <div className="form-group">
             <label className="form-label">Agent Scope</label>
-            <select className="form-select" multiple style={{ height: 'auto', minHeight: '80px' }}>
-              <option defaultChecked>All Claws</option>
-              <option>BuyClaw</option>
-              <option>ReviewClaw</option>
-            </select>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={formScope.length === 0}
+                  onChange={() => setFormScope([])}
+                />
+                All Claws
+              </label>
+              {claws.map(claw => (
+                <label key={claw.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={formScope.includes(claw.id)}
+                    onChange={() => toggleScope(claw.id)}
+                  />
+                  {claw.name}
+                </label>
+              ))}
+            </div>
           </div>
-          <div style={{ display: 'flex', gap: 'var(--space-sm)', marginTop: 'var(--space-sm)' }}>
-            <button className="btn btn-primary btn-sm">Save</button>
-            <button className="btn btn-ghost btn-sm" onClick={() => setShowForm(false)}>Cancel</button>
+          <div style={{ display: 'flex', gap: 'var(--space-sm, 8px)', marginTop: 'var(--space-sm, 8px)' }}>
+            <button
+              className="btn btn-primary btn-sm"
+              onClick={handleSave}
+              disabled={saving}
+            >
+              {saving ? 'Saving...' : editingId ? 'Update' : 'Save'}
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={resetForm} disabled={saving}>
+              Cancel
+            </button>
           </div>
         </div>
       )}

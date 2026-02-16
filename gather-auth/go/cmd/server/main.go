@@ -159,6 +159,8 @@ func main() {
 			"/api/waitlist",
 			"/api/claws",
 			"/api/claws/{path...}",
+			"/api/vault",
+			"/api/vault/{path...}",
 			"/discover",
 		} {
 			e.Router.Any(p, delegate)
@@ -298,6 +300,9 @@ func ensureCollections(app *pocketbase.PocketBase) error {
 		return err
 	}
 	if err := ensureClawDeploymentsCollection(app); err != nil {
+		return err
+	}
+	if err := ensureClawSecretsCollection(app); err != nil {
 		return err
 	}
 	return nil
@@ -1537,10 +1542,28 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 		baseURL = "https://gather.is"
 	}
 
-	// Pass LLM config to the claw daemon (PicoClaw)
-	llmAPIKey := os.Getenv("CLAW_LLM_API_KEY")
-	llmAPIURL := os.Getenv("CLAW_LLM_API_URL")
-	llmModel := os.Getenv("CLAW_LLM_MODEL")
+	// Build env map: host defaults first, then vault overrides
+	envMap := map[string]string{}
+	if v := os.Getenv("CLAW_LLM_API_KEY"); v != "" {
+		envMap["CLAW_LLM_API_KEY"] = v
+	}
+	if v := os.Getenv("CLAW_LLM_API_URL"); v != "" {
+		envMap["CLAW_LLM_API_URL"] = v
+	}
+	if v := os.Getenv("CLAW_LLM_MODEL"); v != "" {
+		envMap["CLAW_LLM_MODEL"] = v
+	}
+
+	// Query vault for user's secrets scoped to this claw (or all claws)
+	userID := record.GetString("user_id")
+	secrets, _ := app.FindRecordsByFilter("claw_secrets",
+		"user_id = {:uid}", "", 100, 0,
+		map[string]any{"uid": userID})
+	for _, s := range secrets {
+		if gatherapi.ScopeMatchesClaw(s.Get("scope"), record.Id) {
+			envMap[s.GetString("key")] = s.GetString("value")
+		}
+	}
 
 	args := []string{"run", "-d",
 		"--name", containerName,
@@ -1555,14 +1578,8 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 		"-e", fmt.Sprintf("GATHER_CHANNEL_ID=%s", channelID),
 		"-e", fmt.Sprintf("GATHER_BASE_URL=%s", baseURL),
 	}
-	if llmAPIKey != "" {
-		args = append(args, "-e", fmt.Sprintf("CLAW_LLM_API_KEY=%s", llmAPIKey))
-	}
-	if llmAPIURL != "" {
-		args = append(args, "-e", fmt.Sprintf("CLAW_LLM_API_URL=%s", llmAPIURL))
-	}
-	if llmModel != "" {
-		args = append(args, "-e", fmt.Sprintf("CLAW_LLM_MODEL=%s", llmModel))
+	for k, v := range envMap {
+		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
 	}
 	args = append(args, image)
 
@@ -1604,6 +1621,30 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 			"id", record.Id, "container", containerName, "subdomain", subdomain,
 			"agent_id", agentRec.Id)
 	}
+}
+
+func ensureClawSecretsCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("claw_secrets")
+	if err == nil {
+		return nil
+	}
+
+	c := core.NewBaseCollection("claw_secrets")
+	c.Fields.Add(
+		&core.TextField{Name: "user_id", Required: true, Max: 50},
+		&core.TextField{Name: "key", Required: true, Max: 100},
+		&core.TextField{Name: "value", Required: true, Max: 2000},
+		&core.JSONField{Name: "scope", MaxSize: 2000},
+		&core.AutodateField{Name: "created", OnCreate: true},
+		&core.AutodateField{Name: "updated", OnCreate: true, OnUpdate: true},
+	)
+	c.AddIndex("idx_secret_user", false, "user_id", "")
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create claw_secrets collection: %w", err)
+	}
+	app.Logger().Info("Created claw_secrets collection")
+	return nil
 }
 
 func ensureClawDeploymentsCollection(app *pocketbase.PocketBase) error {
