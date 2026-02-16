@@ -181,18 +181,28 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 			clawType = "picoclaw"
 		}
 
-		col, err := app.FindCollectionByNameOrId("claw_deployments")
-		if err != nil {
-			return nil, huma.Error500InternalServerError("claw_deployments collection not found")
+		// Reuse existing deployment record if same name+user (preserves ID for vault scoping)
+		existing, _ := app.FindRecordsByFilter("claw_deployments",
+			"user_id = {:uid} && name = {:name}", "", 1, 0,
+			map[string]any{"uid": userID, "name": name})
+
+		var record *core.Record
+		if len(existing) > 0 {
+			record = existing[0]
+		} else {
+			col, err := app.FindCollectionByNameOrId("claw_deployments")
+			if err != nil {
+				return nil, huma.Error500InternalServerError("claw_deployments collection not found")
+			}
+			record = core.NewRecord(col)
+			record.Set("user_id", userID)
 		}
 
-		record := core.NewRecord(col)
 		record.Set("name", name)
 		record.Set("status", "queued")
 		record.Set("instructions", strings.TrimSpace(input.Body.Instructions))
 		record.Set("github_repo", strings.TrimSpace(input.Body.GithubRepo))
 		record.Set("claw_type", clawType)
-		record.Set("user_id", userID)
 
 		if err := app.Save(record); err != nil {
 			return nil, huma.Error500InternalServerError("Failed to create deployment")

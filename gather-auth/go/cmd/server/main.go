@@ -1569,6 +1569,7 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 			"key", s.GetString("key"),
 			"scope_raw", fmt.Sprintf("%v (%T)", rawScope, rawScope),
 			"claw_id", record.Id,
+			"claw_name", clawDisplayName,
 			"matches", matches)
 		if matches {
 			envMap[s.GetString("key")] = s.GetString("value")
