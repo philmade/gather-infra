@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"strings"
@@ -581,14 +582,6 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 			return nil, huma.Error422UnprocessableEntity("Key is required")
 		}
 
-		// Check for duplicate key
-		existing, _ := app.FindRecordsByFilter("claw_secrets",
-			"user_id = {:uid} && key = {:key}", "", 1, 0,
-			map[string]any{"uid": userID, "key": key})
-		if len(existing) > 0 {
-			return nil, huma.Error409Conflict("A vault entry with this key already exists")
-		}
-
 		col, err := app.FindCollectionByNameOrId("claw_secrets")
 		if err != nil {
 			return nil, huma.Error500InternalServerError("claw_secrets collection not found")
@@ -618,13 +611,21 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 		Description: "Update an existing vault entry. Only the owner can update.",
 		Tags:        []string{"Vault"},
 	}, func(ctx context.Context, input *UpdateVaultInput) (*UpdateVaultOutput, error) {
+		log.Printf("[vault-update] ID=%s Key=%v Scope=%v", input.ID, input.Body.Key, input.Body.Scope)
+
 		userID, err := extractPBUserID(app, input.Authorization)
 		if err != nil {
+			log.Printf("[vault-update] auth failed: %v", err)
 			return nil, huma.Error401Unauthorized("Authentication required")
 		}
 
 		record, err := app.FindRecordById("claw_secrets", input.ID)
-		if err != nil || record.GetString("user_id") != userID {
+		if err != nil {
+			log.Printf("[vault-update] record not found: %v", err)
+			return nil, huma.Error404NotFound("Vault entry not found")
+		}
+		if record.GetString("user_id") != userID {
+			log.Printf("[vault-update] ownership mismatch: record=%s, user=%s", record.GetString("user_id"), userID)
 			return nil, huma.Error404NotFound("Vault entry not found")
 		}
 
@@ -633,28 +634,24 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 			if k == "" {
 				return nil, huma.Error422UnprocessableEntity("Key cannot be empty")
 			}
-			// Check duplicate if key is changing
-			if k != record.GetString("key") {
-				existing, _ := app.FindRecordsByFilter("claw_secrets",
-					"user_id = {:uid} && key = {:key}", "", 1, 0,
-					map[string]any{"uid": userID, "key": k})
-				if len(existing) > 0 {
-					return nil, huma.Error409Conflict("A vault entry with this key already exists")
-				}
-			}
 			record.Set("key", k)
 		}
 		if input.Body.Value != nil {
 			record.Set("value", *input.Body.Value)
 		}
 		if input.Body.Scope != nil {
+			log.Printf("[vault-update] setting scope to: %v", input.Body.Scope)
 			record.Set("scope", input.Body.Scope)
+		} else {
+			log.Printf("[vault-update] scope is nil in request body")
 		}
 
 		if err := app.Save(record); err != nil {
+			log.Printf("[vault-update] save failed: %v", err)
 			return nil, huma.Error500InternalServerError("Failed to update vault entry")
 		}
 
+		log.Printf("[vault-update] saved OK, scope in record: %v", record.Get("scope"))
 		out := &UpdateVaultOutput{}
 		out.Body = recordToVaultEntry(record)
 		return out, nil
