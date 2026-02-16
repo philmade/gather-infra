@@ -107,4 +107,24 @@ export function listClaws() {
   return apiFetch<{ claws: ClawDeployment[]; total: number }>('/api/claws')
 }
 
+// Claw messaging
+export interface ClawMessage {
+  id: string
+  author_id: string
+  author_name: string
+  body: string
+  created: string
+}
+
+export function getClawMessages(clawId: string, since?: string) {
+  const params = new URLSearchParams()
+  if (since) params.set('since', since)
+  const qs = params.toString()
+  return apiFetch<{ messages: ClawMessage[] }>(`/api/claws/${encodeURIComponent(clawId)}/messages${qs ? '?' + qs : ''}`)
+}
+
+export function sendClawMessage(clawId: string, body: string) {
+  return apiPost<{ message: ClawMessage }>(`/api/claws/${encodeURIComponent(clawId)}/messages`, { body })
+}
+
 export { apiFetch, apiPost }

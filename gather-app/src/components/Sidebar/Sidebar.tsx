@@ -2,6 +2,7 @@ import WorkspaceHeader from './WorkspaceHeader'
 import ModeToggle from './ModeToggle'
 import ChannelList from './ChannelList'
 import DirectMessageList from './DirectMessageList'
+import ClawList from './ClawList'
 import UserInfo from './UserInfo'
 
 export default function Sidebar() {
@@ -15,6 +16,7 @@ export default function Sidebar() {
       <div className="sidebar-sections">
         <ChannelList />
         <DirectMessageList />
+        <ClawList />
       </div>
       <UserInfo />
     </aside>

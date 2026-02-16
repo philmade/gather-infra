@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -113,6 +114,41 @@ type DeleteClawInput struct {
 type DeleteClawOutput struct {
 	Body struct {
 		OK bool `json:"ok"`
+	}
+}
+
+type ClawMessagesInput struct {
+	Authorization string `header:"Authorization" doc:"Bearer PocketBase auth token" required:"true"`
+	ID            string `path:"id" doc:"Claw deployment ID"`
+	Since         string `query:"since" doc:"Only messages after this timestamp"`
+	Limit         int    `query:"limit" default:"50" minimum:"1" maximum:"200" doc:"Max messages"`
+}
+
+type ClawMessage struct {
+	ID         string `json:"id"`
+	AuthorID   string `json:"author_id"`
+	AuthorName string `json:"author_name"`
+	Body       string `json:"body"`
+	Created    string `json:"created"`
+}
+
+type ClawMessagesOutput struct {
+	Body struct {
+		Messages []ClawMessage `json:"messages"`
+	}
+}
+
+type SendClawMsgInput struct {
+	Authorization string `header:"Authorization" doc:"Bearer PocketBase auth token" required:"true"`
+	ID            string `path:"id" doc:"Claw deployment ID"`
+	Body          struct {
+		Body string `json:"body" doc:"Message content" minLength:"1" maxLength:"5000"`
+	}
+}
+
+type SendClawMsgOutput struct {
+	Body struct {
+		Message ClawMessage `json:"message"`
 	}
 }
 
@@ -331,6 +367,110 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 		out.Body.Total = len(out.Body.Claws)
 		return out, nil
 	})
+
+	// GET /api/claws/{id}/messages — read messages from claw's channel
+	huma.Register(api, huma.Operation{
+		OperationID: "get-claw-messages",
+		Method:      "GET",
+		Path:        "/api/claws/{id}/messages",
+		Summary:     "Read claw messages",
+		Description: "Read messages from a claw's default channel. Only the claw owner can access.",
+		Tags:        []string{"Claws"},
+	}, func(ctx context.Context, input *ClawMessagesInput) (*ClawMessagesOutput, error) {
+		userID, err := extractPBUserID(app, input.Authorization)
+		if err != nil {
+			return nil, huma.Error401Unauthorized("Authentication required")
+		}
+
+		record, err := app.FindRecordById("claw_deployments", input.ID)
+		if err != nil || record.GetString("user_id") != userID {
+			return nil, huma.Error404NotFound("Claw not found")
+		}
+
+		channelID, err := findClawChannel(app, record.GetString("agent_id"))
+		if err != nil {
+			return nil, huma.Error404NotFound("Claw channel not found")
+		}
+
+		filter := "channel_id = {:cid}"
+		params := map[string]any{"cid": channelID}
+		if input.Since != "" {
+			filter += " && created > {:since}"
+			params["since"] = input.Since
+		}
+
+		records, _ := app.FindRecordsByFilter("channel_messages", filter, "-created", input.Limit, 0, params)
+
+		nameCache := map[string]string{}
+		messages := make([]ClawMessage, 0, len(records))
+		for _, r := range records {
+			authorID := r.GetString("author_id")
+			if _, ok := nameCache[authorID]; !ok {
+				nameCache[authorID] = resolveAuthorName(app, authorID)
+			}
+			messages = append(messages, ClawMessage{
+				ID:         r.Id,
+				AuthorID:   authorID,
+				AuthorName: nameCache[authorID],
+				Body:       r.GetString("body"),
+				Created:    r.GetString("created"),
+			})
+		}
+
+		out := &ClawMessagesOutput{}
+		out.Body.Messages = messages
+		return out, nil
+	})
+
+	// POST /api/claws/{id}/messages — send message to claw's channel
+	huma.Register(api, huma.Operation{
+		OperationID: "send-claw-message",
+		Method:      "POST",
+		Path:        "/api/claws/{id}/messages",
+		Summary:     "Send message to claw",
+		Description: "Send a message to a claw's default channel. Only the claw owner can send.",
+		Tags:        []string{"Claws"},
+	}, func(ctx context.Context, input *SendClawMsgInput) (*SendClawMsgOutput, error) {
+		userID, err := extractPBUserID(app, input.Authorization)
+		if err != nil {
+			return nil, huma.Error401Unauthorized("Authentication required")
+		}
+
+		record, err := app.FindRecordById("claw_deployments", input.ID)
+		if err != nil || record.GetString("user_id") != userID {
+			return nil, huma.Error404NotFound("Claw not found")
+		}
+
+		channelID, err := findClawChannel(app, record.GetString("agent_id"))
+		if err != nil {
+			return nil, huma.Error404NotFound("Claw channel not found")
+		}
+
+		col, err := app.FindCollectionByNameOrId("channel_messages")
+		if err != nil {
+			return nil, huma.Error500InternalServerError("channel_messages collection not found")
+		}
+
+		// Store with author_id = "user:{pbUserId}" to distinguish from agent messages
+		authorID := "user:" + userID
+		msgRec := core.NewRecord(col)
+		msgRec.Set("channel_id", channelID)
+		msgRec.Set("author_id", authorID)
+		msgRec.Set("body", input.Body.Body)
+		if err := app.Save(msgRec); err != nil {
+			return nil, huma.Error500InternalServerError("Failed to save message")
+		}
+
+		out := &SendClawMsgOutput{}
+		out.Body.Message = ClawMessage{
+			ID:         msgRec.Id,
+			AuthorID:   authorID,
+			AuthorName: resolveAuthorName(app, authorID),
+			Body:       input.Body.Body,
+			Created:    msgRec.GetString("created"),
+		}
+		return out, nil
+	})
 }
 
 // extractPBUserID parses a PocketBase auth token and returns the user ID.
@@ -347,4 +487,48 @@ func extractPBUserID(app *pocketbase.PocketBase, authHeader string) (string, err
 		return "", err
 	}
 	return record.Id, nil
+}
+
+// extractPBUserRecord parses a PocketBase auth token and returns the full record.
+func extractPBUserRecord(app *pocketbase.PocketBase, authHeader string) (*core.Record, error) {
+	token := strings.TrimPrefix(authHeader, "Bearer ")
+	token = strings.TrimPrefix(token, "bearer ")
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return nil, huma.Error401Unauthorized("Missing auth token")
+	}
+	return app.FindAuthRecordByToken(token, "auth")
+}
+
+// findClawChannel finds the default channel for a claw agent.
+func findClawChannel(app *pocketbase.PocketBase, agentID string) (string, error) {
+	if agentID == "" {
+		return "", fmt.Errorf("no agent_id")
+	}
+	members, err := app.FindRecordsByFilter("channel_members",
+		"agent_id = {:aid} && role = 'owner'", "", 1, 0,
+		map[string]any{"aid": agentID})
+	if err != nil || len(members) == 0 {
+		return "", fmt.Errorf("no channel found for agent %s", agentID)
+	}
+	return members[0].GetString("channel_id"), nil
+}
+
+// resolveAuthorName resolves a display name for a message author.
+// Handles both agent IDs and "user:{pbId}" format.
+func resolveAuthorName(app *pocketbase.PocketBase, authorID string) string {
+	if strings.HasPrefix(authorID, "user:") {
+		pbID := strings.TrimPrefix(authorID, "user:")
+		rec, err := app.FindRecordById("users", pbID)
+		if err == nil {
+			if name := rec.GetString("name"); name != "" {
+				return name
+			}
+			if email := rec.GetString("email"); email != "" {
+				return email
+			}
+		}
+		return "You"
+	}
+	return agentName(app, authorID)
 }

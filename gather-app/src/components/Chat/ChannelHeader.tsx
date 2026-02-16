@@ -7,16 +7,23 @@ export default function ChannelHeader() {
   const { state: chatState, getMembers } = useChat()
   const ch = state.activeChannel
 
+  const isClawTopic = chatState.clawTopic != null && ch.startsWith('claw:')
   const useLive = chatState.connected && chatState.activeTopic != null
 
   let displayName: string
   let topic: string
   let memberCount: number | null = null
+  let isP2P = false
 
-  if (useLive) {
+  if (isClawTopic) {
+    displayName = chatState.clawName || ch.replace('claw:', '')
+    topic = 'Claw agent channel'
+    isP2P = false
+  } else if (useLive) {
     const channel = chatState.channels.find(c => c.topic === chatState.activeTopic)
     displayName = channel?.name ?? chatState.activeTopic!
     topic = channel?.isP2P ? 'Direct message' : ''
+    isP2P = channel?.isP2P ?? false
     const members = getMembers()
     memberCount = members.length > 0 ? members.length : null
   } else {
@@ -25,16 +32,13 @@ export default function ChannelHeader() {
       const dm = directMessages.find(d => d.id === ch)
       displayName = dm?.displayName ?? ch.replace('dm-', '')
       topic = 'Direct message'
+      isP2P = true
     } else {
       const channel = channels.find(c => c.id === ch)
       displayName = ch
       topic = channel?.topic ?? ''
     }
   }
-
-  const isP2P = useLive
-    ? chatState.channels.find(c => c.topic === chatState.activeTopic)?.isP2P
-    : ch.startsWith('dm-')
 
   return (
     <div className="channel-header">

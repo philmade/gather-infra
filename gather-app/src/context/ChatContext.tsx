@@ -2,6 +2,7 @@ import { createContext, useContext, useReducer, useEffect, useCallback, useRef, 
 import { useAuth } from './AuthContext'
 import { pb } from '../lib/pocketbase'
 import { TinodeClient, type ChatMessage, type ChannelInfo, type WorkspaceInfo } from '../lib/tinode'
+import { getClawMessages, sendClawMessage as apiSendClawMessage } from '../lib/api'
 
 interface ChatState {
   connected: boolean
@@ -10,6 +11,9 @@ interface ChatState {
   activeWorkspace: string | null
   activeTopic: string | null
   messages: ChatMessage[]
+  clawTopic: string | null      // "claw:{id}" when viewing a claw channel
+  clawName: string | null       // display name of the active claw
+  clawMessages: ChatMessage[]   // messages from claw REST API
   error: string | null
 }
 
@@ -20,6 +24,9 @@ type ChatAction =
   | { type: 'SET_WORKSPACES'; workspaces: WorkspaceInfo[]; activeWorkspace: string | null }
   | { type: 'SET_TOPIC'; topic: string; messages: ChatMessage[] }
   | { type: 'ADD_MESSAGE'; message: ChatMessage }
+  | { type: 'SET_CLAW_TOPIC'; clawId: string; clawName: string; messages: ChatMessage[] }
+  | { type: 'ADD_CLAW_MESSAGE'; message: ChatMessage }
+  | { type: 'CLEAR_CLAW' }
   | { type: 'SET_ERROR'; error: string }
   | { type: 'RESET' }
 
@@ -34,11 +41,18 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
     case 'SET_WORKSPACES':
       return { ...state, workspaces: action.workspaces, activeWorkspace: action.activeWorkspace }
     case 'SET_TOPIC':
-      return { ...state, activeTopic: action.topic, messages: action.messages }
+      return { ...state, activeTopic: action.topic, messages: action.messages, clawTopic: null, clawName: null, clawMessages: [] }
     case 'ADD_MESSAGE':
       if (action.message.topic !== state.activeTopic) return state
       if (state.messages.some(m => m.seq === action.message.seq)) return state
       return { ...state, messages: [...state.messages, action.message] }
+    case 'SET_CLAW_TOPIC':
+      return { ...state, clawTopic: `claw:${action.clawId}`, clawName: action.clawName, clawMessages: action.messages, activeTopic: null }
+    case 'ADD_CLAW_MESSAGE':
+      if (state.clawMessages.some(m => m.seq === action.message.seq)) return state
+      return { ...state, clawMessages: [...state.clawMessages, action.message] }
+    case 'CLEAR_CLAW':
+      return { ...state, clawTopic: null, clawName: null, clawMessages: [] }
     case 'SET_ERROR':
       return { ...state, error: action.error }
     case 'RESET':
@@ -53,12 +67,16 @@ const initialState: ChatState = {
   activeWorkspace: null,
   activeTopic: null,
   messages: [],
+  clawTopic: null,
+  clawName: null,
+  clawMessages: [],
   error: null,
 }
 
 interface ChatContextValue {
   state: ChatState
   selectTopic: (topic: string) => Promise<void>
+  selectClawTopic: (clawId: string, clawName?: string) => Promise<void>
   sendMessage: (text: string) => Promise<void>
   createWorkspace: (name: string) => Promise<void>
   createChannel: (name: string) => Promise<void>
@@ -73,6 +91,15 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const { state: authState } = useAuth()
   const [state, dispatch] = useReducer(chatReducer, initialState)
   const clientRef = useRef<TinodeClient | null>(null)
+  const clawPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const clawIdRef = useRef<string | null>(null)
+
+  // Clean up claw polling on unmount
+  useEffect(() => {
+    return () => {
+      if (clawPollRef.current) clearInterval(clawPollRef.current)
+    }
+  }, [])
 
   // Connect to Tinode after PocketBase auth
   useEffect(() => {
@@ -163,6 +190,13 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [authState.isAuthenticated])
 
   const selectTopic = useCallback(async (topic: string) => {
+    // Clear claw polling when switching to a Tinode topic
+    if (clawPollRef.current) {
+      clearInterval(clawPollRef.current)
+      clawPollRef.current = null
+    }
+    clawIdRef.current = null
+
     const client = clientRef.current
     if (!client?.isLoggedIn) return
 
@@ -175,11 +209,81 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
+  const selectClawTopic = useCallback(async (clawId: string, clawName?: string) => {
+    // Stop any existing claw polling
+    if (clawPollRef.current) {
+      clearInterval(clawPollRef.current)
+      clawPollRef.current = null
+    }
+    clawIdRef.current = clawId
+
+    // Fetch initial messages
+    try {
+      const data = await getClawMessages(clawId)
+      const msgs: ChatMessage[] = (data.messages || []).reverse().map((m, i) => ({
+        seq: i,
+        from: m.author_name,
+        content: m.body,
+        ts: m.created,
+        isOwn: m.author_id.startsWith('user:'),
+        topic: `claw:${clawId}`,
+      }))
+      dispatch({ type: 'SET_CLAW_TOPIC', clawId, clawName: clawName || clawId, messages: msgs })
+    } catch (err) {
+      console.warn('[Chat] Failed to fetch claw messages:', err)
+      dispatch({ type: 'SET_CLAW_TOPIC', clawId, clawName: clawName || clawId, messages: [] })
+    }
+
+    // Poll for new messages every 3s
+    let lastTs = ''
+    clawPollRef.current = setInterval(async () => {
+      if (clawIdRef.current !== clawId) return
+      try {
+        const since = lastTs || undefined
+        const data = await getClawMessages(clawId, since)
+        const newMsgs = data.messages || []
+        if (newMsgs.length > 0) {
+          lastTs = newMsgs[0].created // newest first from API
+          const msgs: ChatMessage[] = newMsgs.reverse().map((m, i) => ({
+            seq: Date.now() + i,
+            from: m.author_name,
+            content: m.body,
+            ts: m.created,
+            isOwn: m.author_id.startsWith('user:'),
+            topic: `claw:${clawId}`,
+          }))
+          for (const msg of msgs) {
+            dispatch({ type: 'ADD_CLAW_MESSAGE', message: msg })
+          }
+        }
+      } catch { /* silent */ }
+    }, 3000)
+  }, [])
+
   const sendMessage = useCallback(async (text: string) => {
+    // Route to claw REST if a claw topic is active
+    if (clawIdRef.current && state.clawTopic) {
+      try {
+        const data = await apiSendClawMessage(clawIdRef.current, text)
+        const msg: ChatMessage = {
+          seq: Date.now(),
+          from: data.message.author_name,
+          content: data.message.body,
+          ts: data.message.created,
+          isOwn: true,
+          topic: state.clawTopic,
+        }
+        dispatch({ type: 'ADD_CLAW_MESSAGE', message: msg })
+      } catch (err) {
+        console.warn('[Chat] Failed to send claw message:', err)
+      }
+      return
+    }
+
     const client = clientRef.current
     if (!client?.isLoggedIn) return
     await client.sendMessage(text)
-  }, [])
+  }, [state.clawTopic])
 
   const getUserName = useCallback((userId: string) => {
     return clientRef.current?.getUserName(userId) ?? userId
@@ -235,7 +339,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const myUserId = clientRef.current?.myUserId ?? null
 
   return (
-    <ChatContext.Provider value={{ state, selectTopic, sendMessage, createWorkspace, createChannel, getUserName, getMembers, myUserId }}>
+    <ChatContext.Provider value={{ state, selectTopic, selectClawTopic, sendMessage, createWorkspace, createChannel, getUserName, getMembers, myUserId }}>
       {children}
     </ChatContext.Provider>
   )

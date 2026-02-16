@@ -15,7 +15,21 @@ export default function MessageList() {
     if (ref.current) {
       ref.current.scrollTop = ref.current.scrollHeight
     }
-  }, [state.activeChannel, chatState.messages.length])
+  }, [state.activeChannel, chatState.messages.length, chatState.clawMessages.length])
+
+  // Claw REST channel view
+  if (chatState.clawTopic) {
+    return (
+      <div className="message-list" ref={ref}>
+        {chatState.clawMessages.map(msg => (
+          <LiveMessage key={`${msg.ts}-${msg.seq}`} msg={msg} />
+        ))}
+        {chatState.clawMessages.length === 0 && (
+          <div className="message-system"><span>No messages yet. Say something!</span></div>
+        )}
+      </div>
+    )
+  }
 
   // When connected to Tinode, always show live data
   if (chatState.connected) {

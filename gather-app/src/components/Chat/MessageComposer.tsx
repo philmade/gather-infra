@@ -10,10 +10,14 @@ export default function MessageComposer() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const ch = state.activeChannel
-  const useLive = chatState.connected && chatState.activeTopic != null
+  const isClawTopic = chatState.clawTopic != null
+  const useLive = isClawTopic || (chatState.connected && chatState.activeTopic != null)
 
   let placeholder: string
-  if (useLive) {
+  if (isClawTopic) {
+    // Extract claw name from activeChannel (claw:{id})
+    placeholder = `Message claw...`
+  } else if (chatState.connected && chatState.activeTopic != null) {
     const channel = chatState.channels.find(c => c.topic === chatState.activeTopic)
     placeholder = channel?.isP2P
       ? `Message ${channel.name}`
