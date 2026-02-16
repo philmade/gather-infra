@@ -1552,28 +1552,13 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 		envMap["CLAW_LLM_MODEL"] = v
 	}
 
-	// Query vault for user's secrets scoped to this claw (or all claws)
+	// Inject user's vault secrets (overrides host defaults)
 	userID := record.GetString("user_id")
 	secrets, _ := app.FindRecordsByFilter("claw_secrets",
 		"user_id = {:uid}", "", 100, 0,
 		map[string]any{"uid": userID})
-	app.Logger().Info("vault lookup",
-		"claw_id", record.Id,
-		"claw_name", clawDisplayName,
-		"user_id", userID,
-		"secrets_found", len(secrets))
 	for _, s := range secrets {
-		rawScope := s.Get("scope")
-		matches := gatherapi.ScopeMatchesClaw(rawScope, record.Id)
-		app.Logger().Info("vault secret check",
-			"key", s.GetString("key"),
-			"scope_raw", fmt.Sprintf("%v (%T)", rawScope, rawScope),
-			"claw_id", record.Id,
-			"claw_name", clawDisplayName,
-			"matches", matches)
-		if matches {
-			envMap[s.GetString("key")] = s.GetString("value")
-		}
+		envMap[s.GetString("key")] = s.GetString("value")
 	}
 
 	args := []string{"run", "-d",

@@ -181,22 +181,12 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 			clawType = "picoclaw"
 		}
 
-		// Reuse existing deployment record if same name+user (preserves ID for vault scoping)
-		existing, _ := app.FindRecordsByFilter("claw_deployments",
-			"user_id = {:uid} && name = {:name}", "", 1, 0,
-			map[string]any{"uid": userID, "name": name})
-
-		var record *core.Record
-		if len(existing) > 0 {
-			record = existing[0]
-		} else {
-			col, err := app.FindCollectionByNameOrId("claw_deployments")
-			if err != nil {
-				return nil, huma.Error500InternalServerError("claw_deployments collection not found")
-			}
-			record = core.NewRecord(col)
-			record.Set("user_id", userID)
+		col, err := app.FindCollectionByNameOrId("claw_deployments")
+		if err != nil {
+			return nil, huma.Error500InternalServerError("claw_deployments collection not found")
 		}
+		record := core.NewRecord(col)
+		record.Set("user_id", userID)
 
 		record.Set("name", name)
 		record.Set("status", "queued")
@@ -528,39 +518,6 @@ func findClawChannel(app *pocketbase.PocketBase, agentID string) (string, error)
 	return members[0].GetString("channel_id"), nil
 }
 
-// parseScope extracts a string slice from a JSON scope field.
-func parseScope(raw any) []string {
-	if raw == nil {
-		return []string{}
-	}
-	switch v := raw.(type) {
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	case []string:
-		return v
-	}
-	return []string{}
-}
-
-// ScopeMatchesClaw returns true if scope is empty (all claws) or contains the claw ID.
-func ScopeMatchesClaw(scope any, clawID string) bool {
-	parsed := parseScope(scope)
-	if len(parsed) == 0 {
-		return true
-	}
-	for _, id := range parsed {
-		if id == clawID {
-			return true
-		}
-	}
-	return false
-}
 
 // resolveAuthorName resolves a display name for a message author.
 // Handles both agent IDs and "user:{pbId}" format.
