@@ -38,6 +38,13 @@ RUN apk add --no-cache \
     ttyd bash curl ca-certificates jq git \
     openssl ncurses-libs libcurl brotli-libs libssh2
 
+# PicoClaw — single-binary AI agent (handles LLM routing + conversation context)
+RUN ARCH=$(uname -m) && \
+    case "$ARCH" in x86_64) ARCH=amd64;; aarch64) ARCH=arm64;; esac && \
+    curl -fsSL "https://github.com/sipeed/picoclaw/releases/latest/download/picoclaw-linux-${ARCH}" \
+      -o /usr/local/bin/picoclaw && \
+    chmod +x /usr/local/bin/picoclaw
+
 # Copy Chawan installation
 COPY --from=builder /chawan-install/usr/local/bin/cha /usr/local/bin/cha
 COPY --from=builder /chawan-install/usr/local/bin/mancha /usr/local/bin/mancha
@@ -49,6 +56,10 @@ COPY --from=cli-builder /build/gather /usr/local/bin/gather
 # Install claw-browse harness + config
 COPY gather-claw/browser/claw-browse /usr/local/bin/claw-browse
 COPY gather-claw/browser/config/config.toml /etc/claw-browse/config.toml
+
+# Message daemon — bridges Gather channel to PicoClaw
+COPY gather-claw/claw-daemon.sh /usr/local/bin/claw-daemon
+RUN chmod +x /usr/local/bin/claw-daemon
 
 # Boot-time identity setup (runs once at container start)
 COPY gather-claw/setup-identity.sh /usr/local/bin/setup-identity

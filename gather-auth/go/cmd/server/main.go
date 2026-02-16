@@ -1537,7 +1537,12 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 		baseURL = "https://gather.is"
 	}
 
-	cmd := exec.Command("docker", "run", "-d",
+	// Pass LLM config to the claw daemon (PicoClaw)
+	llmAPIKey := os.Getenv("CLAW_LLM_API_KEY")
+	llmAPIURL := os.Getenv("CLAW_LLM_API_URL")
+	llmModel := os.Getenv("CLAW_LLM_MODEL")
+
+	args := []string{"run", "-d",
 		"--name", containerName,
 		"--network", network,
 		"--restart", "unless-stopped",
@@ -1549,8 +1554,19 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 		"-e", fmt.Sprintf("GATHER_AGENT_ID=%s", agentRec.Id),
 		"-e", fmt.Sprintf("GATHER_CHANNEL_ID=%s", channelID),
 		"-e", fmt.Sprintf("GATHER_BASE_URL=%s", baseURL),
-		image,
-	)
+	}
+	if llmAPIKey != "" {
+		args = append(args, "-e", fmt.Sprintf("LLM_API_KEY=%s", llmAPIKey))
+	}
+	if llmAPIURL != "" {
+		args = append(args, "-e", fmt.Sprintf("LLM_API_URL=%s", llmAPIURL))
+	}
+	if llmModel != "" {
+		args = append(args, "-e", fmt.Sprintf("LLM_MODEL=%s", llmModel))
+	}
+	args = append(args, image)
+
+	cmd := exec.Command("docker", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		record.Set("status", "failed")

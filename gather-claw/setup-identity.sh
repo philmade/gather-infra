@@ -13,6 +13,12 @@ if [ -n "$GATHER_PRIVATE_KEY" ]; then
 CONF
     # Pre-authenticate so JWT is cached for immediate use
     gather auth > /dev/null 2>&1 || true
+
+    # Start message daemon in background (responds to Gather channel messages via LLM)
+    if [ -n "$GATHER_CHANNEL_ID" ] && [ -x /usr/local/bin/claw-daemon ]; then
+        /usr/local/bin/claw-daemon &
+        echo "Message daemon started (PID $!, log: /tmp/claw-daemon.log)"
+    fi
 fi
 
 # Hand off to CMD (ttyd)
