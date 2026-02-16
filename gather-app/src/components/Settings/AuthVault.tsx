@@ -1,6 +1,14 @@
 import { useState, useEffect } from 'react'
 import { listVault, createVaultEntry, updateVaultEntry, deleteVaultEntry, listClaws, type VaultEntry, type ClawDeployment } from '../../lib/api'
 
+const SUGGESTED_VARS = [
+  { key: 'CLAW_LLM_API_KEY', desc: 'API key for your LLM provider (OpenAI, Anthropic, Z.AI, etc.)' },
+  { key: 'CLAW_LLM_API_URL', desc: 'LLM base URL — e.g. https://api.openai.com/v1' },
+  { key: 'CLAW_LLM_MODEL', desc: 'Model name — e.g. gpt-4o, claude-sonnet-4-5-20250929' },
+  { key: 'TELEGRAM_BOT_TOKEN', desc: 'Telegram Bot API token from @BotFather' },
+  { key: 'GITHUB_TOKEN', desc: 'GitHub personal access token for repo access' },
+]
+
 export default function AuthVault() {
   const [entries, setEntries] = useState<VaultEntry[]>([])
   const [claws, setClaws] = useState<ClawDeployment[]>([])
@@ -42,6 +50,15 @@ export default function AuthVault() {
     setFormScope([])
     setShowForm(false)
     setEditingId(null)
+    setError('')
+  }
+
+  function startAdd(key: string) {
+    setEditingId(null)
+    setFormKey(key)
+    setFormValue('')
+    setFormScope([])
+    setShowForm(true)
     setError('')
   }
 
@@ -106,13 +123,18 @@ export default function AuthVault() {
     }).join(', ')
   }
 
+  const existingKeys = new Set(entries.map(e => e.key))
+  const suggestions = SUGGESTED_VARS.filter(s => !existingKeys.has(s.key))
+
   if (loading) return <div>Loading vault...</div>
 
   return (
     <div>
       <h2>Authentication Vault</h2>
       <p className="section-desc">
-        Store secrets that your Claws can access. Variables are injected as environment variables when a Claw is provisioned.
+        Store API keys and tokens that your Claws need. Each variable is injected as an
+        environment variable when a Claw is deployed. To change a running Claw's config,
+        update the value here then re-deploy the Claw.
       </p>
 
       {error && (
@@ -151,10 +173,52 @@ export default function AuthVault() {
         ))}
         {entries.length === 0 && (
           <div className="vault-row" style={{ opacity: 0.6 }}>
-            <span>No secrets stored yet</span>
+            <span>No secrets stored yet — add one below</span>
           </div>
         )}
       </div>
+
+      {suggestions.length > 0 && !showForm && (
+        <div style={{
+          margin: '16px 0',
+          padding: '12px 16px',
+          background: 'var(--color-surface-2, #1a1a2e)',
+          borderRadius: '8px',
+          border: '1px solid var(--color-border, #333)',
+        }}>
+          <div style={{ fontSize: '0.8rem', opacity: 0.7, marginBottom: '8px' }}>
+            Suggested variables — click to add:
+          </div>
+          {suggestions.map(s => (
+            <div
+              key={s.key}
+              onClick={() => startAdd(s.key)}
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                padding: '6px 8px',
+                marginBottom: '4px',
+                borderRadius: '4px',
+                cursor: 'pointer',
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--color-surface-3, #252540)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >
+              <div>
+                <span style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: '0.85rem' }}>
+                  {s.key}
+                </span>
+                <span style={{ opacity: 0.5, fontSize: '0.8rem', marginLeft: '8px' }}>
+                  {s.desc}
+                </span>
+              </div>
+              <span style={{ opacity: 0.4, fontSize: '0.75rem' }}>+ Add</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {!showForm && (
         <button className="btn btn-secondary btn-sm" onClick={() => { resetForm(); setShowForm(true) }}>
@@ -187,7 +251,12 @@ export default function AuthVault() {
             />
           </div>
           <div className="form-group">
-            <label className="form-label">Agent Scope</label>
+            <label className="form-label">
+              Scope
+              <span style={{ opacity: 0.5, fontWeight: 'normal', marginLeft: '6px', fontSize: '0.8rem' }}>
+                — which Claws can use this variable?
+              </span>
+            </label>
             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
                 <input
@@ -207,6 +276,11 @@ export default function AuthVault() {
                   {claw.name}
                 </label>
               ))}
+              {claws.length === 0 && (
+                <span style={{ opacity: 0.5, fontSize: '0.8rem' }}>
+                  No claws deployed yet — variable will apply to all future claws
+                </span>
+              )}
             </div>
           </div>
           <div style={{ display: 'flex', gap: 'var(--space-sm, 8px)', marginTop: 'var(--space-sm, 8px)' }}>
