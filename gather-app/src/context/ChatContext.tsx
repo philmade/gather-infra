@@ -93,6 +93,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const clientRef = useRef<TinodeClient | null>(null)
   const clawPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const clawIdRef = useRef<string | null>(null)
+  const clawSeenIdsRef = useRef<Set<string>>(new Set())
 
   // Clean up claw polling on unmount
   useEffect(() => {
@@ -217,10 +218,19 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
     clawIdRef.current = clawId
 
+    // Track seen message IDs to prevent duplicates
+    clawSeenIdsRef.current = new Set()
+    let lastTs = ''
+
     // Fetch initial messages
     try {
       const data = await getClawMessages(clawId)
-      const msgs: ChatMessage[] = (data.messages || []).reverse().map((m, i) => ({
+      const raw = data.messages || []
+      for (const m of raw) clawSeenIdsRef.current.add(m.id)
+      // Initialize watermark from newest message (API returns newest first)
+      if (raw.length > 0) lastTs = raw[0].created
+
+      const msgs: ChatMessage[] = raw.reverse().map((m, i) => ({
         seq: i,
         from: m.author_name,
         content: m.body,
@@ -235,15 +245,14 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     }
 
     // Poll for new messages every 3s
-    let lastTs = ''
     clawPollRef.current = setInterval(async () => {
       if (clawIdRef.current !== clawId) return
       try {
-        const since = lastTs || undefined
-        const data = await getClawMessages(clawId, since)
-        const newMsgs = data.messages || []
+        const data = await getClawMessages(clawId, lastTs || undefined)
+        const newMsgs = (data.messages || []).filter(m => !clawSeenIdsRef.current.has(m.id))
         if (newMsgs.length > 0) {
-          lastTs = newMsgs[0].created // newest first from API
+          for (const m of newMsgs) clawSeenIdsRef.current.add(m.id)
+          lastTs = newMsgs[0].created
           const msgs: ChatMessage[] = newMsgs.reverse().map((m, i) => ({
             seq: Date.now() + i,
             from: m.author_name,
@@ -265,6 +274,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     if (clawIdRef.current && state.clawTopic) {
       try {
         const data = await apiSendClawMessage(clawIdRef.current, text)
+        // Mark as seen so the poll doesn't duplicate it
+        clawSeenIdsRef.current.add(data.message.id)
         const msg: ChatMessage = {
           seq: Date.now(),
           from: data.message.author_name,
