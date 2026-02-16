@@ -1556,13 +1556,13 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 		"-e", fmt.Sprintf("GATHER_BASE_URL=%s", baseURL),
 	}
 	if llmAPIKey != "" {
-		args = append(args, "-e", fmt.Sprintf("LLM_API_KEY=%s", llmAPIKey))
+		args = append(args, "-e", fmt.Sprintf("CLAW_LLM_API_KEY=%s", llmAPIKey))
 	}
 	if llmAPIURL != "" {
-		args = append(args, "-e", fmt.Sprintf("LLM_API_URL=%s", llmAPIURL))
+		args = append(args, "-e", fmt.Sprintf("CLAW_LLM_API_URL=%s", llmAPIURL))
 	}
 	if llmModel != "" {
-		args = append(args, "-e", fmt.Sprintf("LLM_MODEL=%s", llmModel))
+		args = append(args, "-e", fmt.Sprintf("CLAW_LLM_MODEL=%s", llmModel))
 	}
 	args = append(args, image)
 
