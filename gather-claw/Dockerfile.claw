@@ -18,7 +18,7 @@ RUN apk add --no-cache git
 WORKDIR /build
 RUN git clone --depth 1 --branch gather-channel https://github.com/philmade/picoclaw.git .
 RUN cp -r workspace cmd/picoclaw/workspace
-RUN CGO_ENABLED=0 go build -o picoclaw ./cmd/picoclaw/
+RUN GOTOOLCHAIN=auto CGO_ENABLED=0 go build -o picoclaw ./cmd/picoclaw/
 
 # === Stage 1: Build Chawan from source ===
 FROM alpine:3.21 AS builder
