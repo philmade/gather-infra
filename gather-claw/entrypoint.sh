@@ -7,17 +7,8 @@ DIM='\033[2m'
 BOLD='\033[1m'
 RESET='\033[0m'
 
-# --- Set up Gather agent identity from env vars ---
-if [ -n "$GATHER_PRIVATE_KEY" ]; then
-    mkdir -p ~/.gather/keys
-    echo "$GATHER_PRIVATE_KEY" | base64 -d > ~/.gather/keys/claw-private.pem
-    chmod 600 ~/.gather/keys/claw-private.pem
-    echo "$GATHER_PUBLIC_KEY" | base64 -d > ~/.gather/keys/claw-public.pem
-    mkdir -p ~/.gather
-    cat > ~/.gather/config.json << CONF
-{"base_url": "${GATHER_BASE_URL:-https://gather.is}", "key_name": "claw"}
-CONF
-fi
+# Identity setup is handled at boot time by setup-identity.sh (ENTRYPOINT).
+# Keys and config are already at ~/.gather/ when this runs.
 
 clear
 echo -e "${CYAN}"

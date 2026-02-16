@@ -50,9 +50,14 @@ COPY --from=cli-builder /build/gather /usr/local/bin/gather
 COPY gather-claw/browser/claw-browse /usr/local/bin/claw-browse
 COPY gather-claw/browser/config/config.toml /etc/claw-browse/config.toml
 
-# Branded entrypoint
+# Boot-time identity setup (runs once at container start)
+COPY gather-claw/setup-identity.sh /usr/local/bin/setup-identity
+RUN chmod +x /usr/local/bin/setup-identity
+
+# Branded terminal shell (runs per ttyd connection)
 COPY gather-claw/entrypoint.sh /usr/local/bin/claw-entrypoint
 RUN chmod +x /usr/local/bin/claw-entrypoint
 
 EXPOSE 7681
+ENTRYPOINT ["setup-identity"]
 CMD ["ttyd", "-W", "-p", "7681", "-t", "fontSize=14", "-t", "titleFixed=Claw", "claw-entrypoint"]
