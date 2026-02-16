@@ -23,6 +23,21 @@ LLM_API_KEY="${CLAW_LLM_API_KEY:-}"
 LLM_API_URL="${CLAW_LLM_API_URL:-}"
 LLM_MODEL="${CLAW_LLM_MODEL:-glm-4.7}"
 
+# Build channels JSON — always include gather, add telegram if token present
+CHANNELS_JSON='"gather": {
+      "enabled": true,
+      "base_url": "'"${GATHER_BASE_URL:-https://gather.is}"'",
+      "channel_id": "'"${GATHER_CHANNEL_ID:-}"'",
+      "poll_interval": 3
+    }'
+if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+    CHANNELS_JSON="$CHANNELS_JSON"',
+    "telegram": {
+      "enabled": true,
+      "token": "'"$TELEGRAM_BOT_TOKEN"'"
+    }'
+fi
+
 cat > "$PICOCLAW_DIR/config.json" << PCONF
 {
   "agents": {
@@ -34,12 +49,7 @@ cat > "$PICOCLAW_DIR/config.json" << PCONF
     }
   },
   "channels": {
-    "gather": {
-      "enabled": true,
-      "base_url": "${GATHER_BASE_URL:-https://gather.is}",
-      "channel_id": "${GATHER_CHANNEL_ID:-}",
-      "poll_interval": 3
-    }
+    $CHANNELS_JSON
   },
   "providers": {
     "openai": {
