@@ -62,6 +62,9 @@ services:
       CLAW_PROVISIONER_KEY: ${CLAW_PROVISIONER_KEY}
       CLAW_DOCKER_IMAGE: ${CLAW_DOCKER_IMAGE:-claw-base:latest}
       CLAW_DOCKER_NETWORK: ${CLAW_DOCKER_NETWORK:-gather-infra_gather_net}
+      CLAW_LLM_API_KEY: ${CLAW_LLM_API_KEY}
+      CLAW_LLM_API_URL: ${CLAW_LLM_API_URL}
+      CLAW_LLM_MODEL: ${CLAW_LLM_MODEL}
     volumes:
       - pocketbase_data:/pb_data
       - /var/run/docker.sock:/var/run/docker.sock
