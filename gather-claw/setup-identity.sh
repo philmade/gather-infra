@@ -45,7 +45,8 @@ cat > "$PICOCLAW_DIR/config.json" << PCONF
       "provider": "openai",
       "model": "$LLM_MODEL",
       "max_tokens": 4096,
-      "temperature": 0.7
+      "temperature": 0.7,
+      "restrict_to_workspace": false
     }
   },
   "channels": {
