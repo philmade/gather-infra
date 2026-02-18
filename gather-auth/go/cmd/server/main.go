@@ -1550,7 +1550,10 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 	if v := os.Getenv("CLAW_LLM_API_KEY"); v != "" {
 		envMap["ANTHROPIC_API_KEY"] = v
 	}
-	if v := os.Getenv("CLAW_LLM_API_URL"); v != "" {
+	// Note: CLAW_LLM_API_URL is OpenAI-compatible (z.ai/api/coding/paas/v4).
+	// ClawPoint-Go defaults to the Anthropic-compatible endpoint (z.ai/api/anthropic).
+	// Only override if CLAW_ANTHROPIC_API_BASE is explicitly set.
+	if v := os.Getenv("CLAW_ANTHROPIC_API_BASE"); v != "" {
 		envMap["ANTHROPIC_API_BASE"] = v
 	}
 	if v := os.Getenv("CLAW_LLM_MODEL"); v != "" {
