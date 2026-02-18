@@ -1,11 +1,16 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/pocketbase/pocketbase"
@@ -441,7 +446,8 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 			return nil, huma.Error404NotFound("Claw not found")
 		}
 
-		channelID, err := findClawChannel(app, record.GetString("agent_id"))
+		agentID := record.GetString("agent_id")
+		channelID, err := findClawChannel(app, agentID)
 		if err != nil {
 			return nil, huma.Error404NotFound("Claw channel not found")
 		}
@@ -451,23 +457,45 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 			return nil, huma.Error500InternalServerError("channel_messages collection not found")
 		}
 
-		// Store with author_id = "user:{pbUserId}" to distinguish from agent messages
-		authorID := "user:" + userID
+		// Save user's message
+		userAuthorID := "user:" + userID
 		msgRec := core.NewRecord(col)
 		msgRec.Set("channel_id", channelID)
-		msgRec.Set("author_id", authorID)
+		msgRec.Set("author_id", userAuthorID)
 		msgRec.Set("body", input.Body.Body)
 		if err := app.Save(msgRec); err != nil {
 			return nil, huma.Error500InternalServerError("Failed to save message")
 		}
 
+		// Forward to claw container's ADK API
+		containerID := record.GetString("container_id")
+		if containerID == "" {
+			return nil, huma.Error422UnprocessableEntity("Claw container not running")
+		}
+
+		adkReply, err := sendToADK(containerID, userID, input.Body.Body)
+		if err != nil {
+			app.Logger().Error("ADK proxy failed", "claw", containerID, "error", err)
+			return nil, huma.NewError(http.StatusBadGateway, fmt.Sprintf("Claw did not respond: %v", err))
+		}
+
+		// Save the claw's response as a channel message
+		replyRec := core.NewRecord(col)
+		replyRec.Set("channel_id", channelID)
+		replyRec.Set("author_id", agentID)
+		replyRec.Set("body", adkReply)
+		if err := app.Save(replyRec); err != nil {
+			app.Logger().Error("Failed to save claw reply", "claw", containerID, "error", err)
+		}
+
+		// Return the claw's reply
 		out := &SendClawMsgOutput{}
 		out.Body.Message = ClawMessage{
-			ID:         msgRec.Id,
-			AuthorID:   authorID,
-			AuthorName: resolveAuthorName(app, authorID),
-			Body:       input.Body.Body,
-			Created:    msgRec.GetString("created"),
+			ID:         replyRec.Id,
+			AuthorID:   agentID,
+			AuthorName: resolveAuthorName(app, agentID),
+			Body:       adkReply,
+			Created:    replyRec.GetString("created"),
 		}
 		return out, nil
 	})
@@ -475,6 +503,100 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 	// =========================================================================
 	// Vault endpoints — per-user secrets for claw env injection
 	// =========================================================================
+}
+
+// ---------------------------------------------------------------------------
+// ADK proxy — forward user messages to the claw container's ADK API
+// ---------------------------------------------------------------------------
+
+// adkRunRequest is the JSON body for POST /api/run on the ADK server.
+type adkRunRequest struct {
+	AppName    string     `json:"appName"`
+	UserID     string     `json:"userId"`
+	SessionID  string     `json:"sessionId"`
+	NewMessage adkMessage `json:"newMessage"`
+}
+
+type adkMessage struct {
+	Role  string    `json:"role"`
+	Parts []adkPart `json:"parts"`
+}
+
+type adkPart struct {
+	Text string `json:"text"`
+}
+
+type adkEvent struct {
+	Content *adkMessage `json:"content,omitempty"`
+	Author  string      `json:"author,omitempty"`
+}
+
+var adkClient = &http.Client{Timeout: 120 * time.Second}
+
+// sendToADK forwards a user message to the claw's ADK API and returns the agent's text response.
+func sendToADK(containerName, userID, text string) (string, error) {
+	base := fmt.Sprintf("http://%s:8080", containerName)
+	sessionID := fmt.Sprintf("chat-%s", userID)
+
+	// Ensure session exists (idempotent — ADK returns existing if already created)
+	sessURL := fmt.Sprintf("%s/api/apps/clawpoint/users/%s/sessions/%s", base, userID, sessionID)
+	sessReq, _ := http.NewRequest("POST", sessURL, bytes.NewBufferString("{}"))
+	sessReq.Header.Set("Content-Type", "application/json")
+	sessResp, err := adkClient.Do(sessReq)
+	if err != nil {
+		return "", fmt.Errorf("ADK session create failed: %w", err)
+	}
+	sessResp.Body.Close()
+
+	// Send the message
+	body, _ := json.Marshal(adkRunRequest{
+		AppName:   "clawpoint",
+		UserID:    userID,
+		SessionID: sessionID,
+		NewMessage: adkMessage{
+			Role:  "user",
+			Parts: []adkPart{{Text: text}},
+		},
+	})
+
+	runResp, err := adkClient.Post(base+"/api/run", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return "", fmt.Errorf("ADK run failed: %w", err)
+	}
+	defer runResp.Body.Close()
+
+	respBody, err := io.ReadAll(runResp.Body)
+	if err != nil {
+		return "", fmt.Errorf("ADK response read failed: %w", err)
+	}
+
+	if runResp.StatusCode != 200 {
+		return "", fmt.Errorf("ADK returned %d: %s", runResp.StatusCode, string(respBody))
+	}
+
+	// Parse ADK response — array of events, find the last model response
+	var events []adkEvent
+	if err := json.Unmarshal(respBody, &events); err != nil {
+		return "", fmt.Errorf("ADK response parse failed: %w", err)
+	}
+
+	// Walk events in reverse to find the last model content
+	for i := len(events) - 1; i >= 0; i-- {
+		ev := events[i]
+		if ev.Content != nil && ev.Content.Role == "model" && len(ev.Content.Parts) > 0 {
+			var parts []string
+			for _, p := range ev.Content.Parts {
+				if p.Text != "" {
+					parts = append(parts, p.Text)
+				}
+			}
+			if len(parts) > 0 {
+				return strings.Join(parts, "\n"), nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no model response in ADK events")
 }
 
 // extractPBUserID parses a PocketBase auth token and returns the user ID.
