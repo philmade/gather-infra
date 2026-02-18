@@ -13,17 +13,17 @@ set -euo pipefail
 #
 # Optional env:
 #   GATHER_API_URL        — default: http://127.0.0.1:8090
-#   BUYCLAW_ROOT          — default: /srv/buyclaw
-#   ZAI_API_KEY           — z.ai API key for PicoClaw
-#   TELEGRAM_BOT_TOKEN    — Telegram bot token for PicoClaw
+#   CLAW_ROOT             — default: /srv/claw
+#   ZAI_API_KEY           — z.ai API key for clawpoint-go
+#   TELEGRAM_BOT_TOKEN    — Telegram bot token
+#   TELEGRAM_CHAT_ID      — Telegram chat ID
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-REPO_DIR="$(dirname "$SCRIPT_DIR")"
 
 GATHER_API_URL="${GATHER_API_URL:-http://127.0.0.1:8090}"
-BUYCLAW_ROOT="${BUYCLAW_ROOT:-/srv/buyclaw}"
-USERS_DIR="$BUYCLAW_ROOT/users"
-NGINX_DIR="/etc/nginx/buyclaw-users"
+CLAW_ROOT="${CLAW_ROOT:-/srv/claw}"
+USERS_DIR="$CLAW_ROOT/users"
+NGINX_DIR="/etc/nginx/claw-users"
 
 if [ -z "${CLAW_PROVISIONER_KEY:-}" ]; then
     echo "Error: CLAW_PROVISIONER_KEY is required" >&2
@@ -58,33 +58,24 @@ provision_claw() {
 
     local user_dir="$USERS_DIR/$subdomain"
     local container_name="claw-$subdomain"
-    local password
-    password=$(openssl rand -base64 12)
 
     # Create directory structure
-    mkdir -p "$user_dir/config/.picoclaw" "$user_dir/config/workspace" "$user_dir/config/custom-cont-init.d"
+    mkdir -p "$user_dir/data" "$user_dir/soul"
 
-    # Copy template config if available
-    if [ -d "$REPO_DIR/template" ]; then
-        cp -r "$REPO_DIR/template/"* "$user_dir/config/" 2>/dev/null || true
-        cp -r "$REPO_DIR/template/".* "$user_dir/config/" 2>/dev/null || true
+    # Write instructions to soul if provided
+    if [ -n "$instructions" ] && [ "$instructions" != "null" ]; then
+        echo "$instructions" > "$user_dir/soul/SOUL.md"
     fi
 
     # Write docker-compose.yml from template
     sed -e "s/__USERNAME__/$subdomain/g" \
-        -e "s/__PASSWORD__/$password/g" \
         -e "s/__PORT__/$port/g" \
+        -e "s|__ZAI_API_KEY__|${ZAI_API_KEY:-}|g" \
+        -e "s|__TELEGRAM_BOT_TOKEN__|${TELEGRAM_BOT_TOKEN:-}|g" \
+        -e "s|__TELEGRAM_CHAT_ID__|${TELEGRAM_CHAT_ID:-}|g" \
+        -e "s|__GATHER_PRIVATE_KEY__|${GATHER_PRIVATE_KEY:-}|g" \
+        -e "s|__GATHER_PUBLIC_KEY__|${GATHER_PUBLIC_KEY:-}|g" \
         "$SCRIPT_DIR/docker-compose.user.yml.tpl" > "$user_dir/docker-compose.yml"
-
-    # Write PicoClaw config from template
-    sed -e "s/__ZAI_API_KEY__/${ZAI_API_KEY:-__ZAI_API_KEY__}/g" \
-        -e "s/__TELEGRAM_BOT_TOKEN__/${TELEGRAM_BOT_TOKEN:-__TELEGRAM_BOT_TOKEN__}/g" \
-        "$SCRIPT_DIR/picoclaw.json.tpl" > "$user_dir/config/.picoclaw/config.json"
-
-    # Write instructions file if provided
-    if [ -n "$instructions" ] && [ "$instructions" != "null" ]; then
-        echo "$instructions" > "$user_dir/config/.picoclaw/instructions.txt"
-    fi
 
     # Write nginx config
     mkdir -p "$NGINX_DIR"

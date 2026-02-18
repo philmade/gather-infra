@@ -194,16 +194,20 @@ Note: PocketBase must not be writing at the same moment (SQLite single-writer). 
 
 ## Claw Infrastructure Notes
 
-**Build context:** The claw Docker image (`gather-claw/Dockerfile.claw`) must be built from the **repo root**, not from `gather-claw/`:
-```bash
-docker build -t claw-base:latest -f gather-claw/Dockerfile.claw .
-```
-This is because the image includes the gather CLI (built from `gather-cli/`).
+**Stack:** ClawPoint-Go (Google ADK multi-agent orchestrator) in Alpine containers (~50MB). Each claw runs clawpoint-go + clawpoint-medic (supervisor) + matterbridge (Telegram) + clawpoint-bridge. Port 8080 (ADK API).
 
-**Claw agent identity:** Each claw gets an Ed25519 keypair + agent record + default channel at provision time. Keys are passed as base64-encoded env vars (`GATHER_PRIVATE_KEY`, `GATHER_PUBLIC_KEY`) and decoded by the entrypoint. The private key is visible via `docker inspect` — acceptable for single-user claws.
-
-**Rebuilding claw image after CLI changes:** If the gather CLI changes, the claw base image must be rebuilt on the server:
+**Build context:** The claw Docker image is built from `gather-claw/` with clawpoint-go source synced in:
 ```bash
-ssh <your-server> "cd /opt/gather-infra && docker build -t claw-base:latest -f gather-claw/Dockerfile.claw ."
+rsync -av /path/to/clawpoint-go/ gather-claw/clawpoint-go/
+cd gather-claw && docker build -t gather-claw:latest .
 ```
-Existing running claws keep their old image. Only newly provisioned claws use the updated image.
+
+**Claw agent identity:** Each claw gets an Ed25519 keypair at provision time. Keys are passed as base64-encoded env vars (`GATHER_PRIVATE_KEY`, `GATHER_PUBLIC_KEY`) and decoded by the entrypoint. The private key is visible via `docker inspect` — acceptable for single-user claws.
+
+**Provisioning:**
+```bash
+cd gather-claw/provisioning && ./provision.sh <username> --zai-key <key> --telegram-token <token> --telegram-chat-id <id>
+```
+Creates `/srv/claw/users/<username>/` with docker-compose.yml, data/, soul/. Containers named `claw-<username>`.
+
+**Server paths:** User dirs at `/srv/claw/users/`, NGINX configs at `/etc/nginx/claw-users/`.

@@ -1,0 +1,22 @@
+services:
+  claw:
+    build: .
+    image: gather-claw:latest
+    container_name: claw-dev
+    environment:
+      - MODEL_PROVIDER=anthropic
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - ANTHROPIC_API_BASE=${ANTHROPIC_API_BASE:-https://api.z.ai/api/anthropic}
+      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-glm-5}
+      - TELEGRAM_BOT=${TELEGRAM_BOT:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - CLAWPOINT_ROOT=/app
+      - CLAWPOINT_DB=/app/data/messages.db
+    volumes:
+      - ./dev-data:/app/data
+      - ./dev-soul:/app/soul
+    ports:
+      - "8080:8080"
+    mem_limit: 512m
+    cpus: 1
+    restart: unless-stopped

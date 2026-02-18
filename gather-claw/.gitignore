@@ -1,0 +1,20 @@
+# Secrets & credentials
+.gather/keys/
+
+# ClawPoint-Go source (synced from external repo, not committed)
+clawpoint-go/
+
+# Dev data volumes
+dev-data/
+dev-soul/
+
+# Runtime state & logs
+.gather/heartbeat.log
+.gather/heartbeat_state.json
+
+# Python
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
