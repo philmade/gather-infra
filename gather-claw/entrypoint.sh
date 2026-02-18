@@ -33,7 +33,7 @@ account="api.claw"
 channel="api"
 MBEOF
     echo "Starting matterbridge..."
-    matterbridge -conf /app/matterbridge.toml > /var/log/matterbridge.log 2>&1 &
+    matterbridge -conf /app/matterbridge.toml > /tmp/matterbridge.log 2>&1 &
 fi
 
 # --- Soul files (copy defaults if not mounted) ---
@@ -44,12 +44,12 @@ fi
 
 # --- Start clawpoint-go ---
 echo "Starting clawpoint-go..."
-./clawpoint-go web api webui > /var/log/adk-go.log 2>&1 &
+./clawpoint-go web api webui > /tmp/adk-go.log 2>&1 &
 
 # --- Start bridge (if matterbridge running) ---
 if [ -n "$TELEGRAM_BOT" ]; then
     echo "Starting clawpoint-bridge..."
-    ./clawpoint-bridge > /var/log/bridge.log 2>&1 &
+    ./clawpoint-bridge > /tmp/bridge.log 2>&1 &
 fi
 
 # --- Medic as foreground supervisor ---
