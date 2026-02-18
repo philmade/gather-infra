@@ -1524,7 +1524,7 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 	// --- Launch Docker container with identity env vars ---
 	image := os.Getenv("CLAW_DOCKER_IMAGE")
 	if image == "" {
-		image = "claw-base:latest"
+		image = "gather-claw:latest"
 	}
 	network := os.Getenv("CLAW_DOCKER_NETWORK")
 	if network == "" {
@@ -1541,15 +1541,20 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 	}
 
 	// Build env map: host defaults first, then vault overrides
-	envMap := map[string]string{}
+	// Map CLAW_LLM_* host vars to ClawPoint-Go equivalents
+	envMap := map[string]string{
+		"MODEL_PROVIDER": "anthropic",
+		"CLAWPOINT_ROOT": "/app",
+		"CLAWPOINT_DB":   "/app/data/messages.db",
+	}
 	if v := os.Getenv("CLAW_LLM_API_KEY"); v != "" {
-		envMap["CLAW_LLM_API_KEY"] = v
+		envMap["ANTHROPIC_API_KEY"] = v
 	}
 	if v := os.Getenv("CLAW_LLM_API_URL"); v != "" {
-		envMap["CLAW_LLM_API_URL"] = v
+		envMap["ANTHROPIC_API_BASE"] = v
 	}
 	if v := os.Getenv("CLAW_LLM_MODEL"); v != "" {
-		envMap["CLAW_LLM_MODEL"] = v
+		envMap["ANTHROPIC_MODEL"] = v
 	}
 
 	// Inject user's vault secrets (overrides host defaults)
@@ -1561,12 +1566,16 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 		envMap[s.GetString("key")] = s.GetString("value")
 	}
 
+	// Persistent data volume for memory DB and soul files
+	dataVolume := fmt.Sprintf("claw-data-%s", subdomain)
+
 	args := []string{"run", "-d",
 		"--name", containerName,
 		"--network", network,
 		"--restart", "unless-stopped",
 		"--memory", "512m",
 		"--cpus", "1",
+		"-v", fmt.Sprintf("%s:/app/data", dataVolume),
 		"-e", fmt.Sprintf("CLAW_NAME=%s", clawDisplayName),
 		"-e", fmt.Sprintf("GATHER_PRIVATE_KEY=%s", privB64),
 		"-e", fmt.Sprintf("GATHER_PUBLIC_KEY=%s", pubB64),
