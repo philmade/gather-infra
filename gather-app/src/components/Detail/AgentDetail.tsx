@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import { useWorkspace } from '../../context/WorkspaceContext'
 import { pb } from '../../lib/pocketbase'
-import { updateClawSettings } from '../../lib/api'
+import { updateClawSettings, createClawCheckout } from '../../lib/api'
 
 interface ClawDetail {
   id: string
@@ -17,6 +17,8 @@ interface ClawDetail {
   is_public: boolean
   heartbeat_interval: number
   heartbeat_instruction?: string
+  paid?: boolean
+  trial_ends_at?: string
   created: string
 }
 
@@ -33,6 +35,8 @@ export default function AgentDetail() {
   const [claw, setClaw] = useState<ClawDetail | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [upgrading, setUpgrading] = useState(false)
+  const [trialRemaining, setTrialRemaining] = useState('')
   const [isPublic, setIsPublic] = useState(true)
   const [heartbeatInterval, setHeartbeatInterval] = useState(0)
   const [heartbeatInstruction, setHeartbeatInstruction] = useState('')
@@ -57,6 +61,37 @@ export default function AgentDetail() {
     }
     fetchClaw()
   }, [state.selectedAgent])
+
+  // Trial countdown
+  useEffect(() => {
+    if (!claw || claw.paid || !claw.trial_ends_at) {
+      setTrialRemaining('')
+      return
+    }
+    function tick() {
+      const end = new Date(claw!.trial_ends_at!).getTime()
+      const diff = Math.max(0, end - Date.now())
+      const mins = Math.floor(diff / 60000)
+      const secs = Math.floor((diff % 60000) / 1000)
+      setTrialRemaining(`${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`)
+    }
+    tick()
+    const id = setInterval(tick, 1000)
+    return () => clearInterval(id)
+  }, [claw?.paid, claw?.trial_ends_at])
+
+  const handleUpgrade = useCallback(async () => {
+    if (!claw) return
+    setUpgrading(true)
+    try {
+      const { url } = await createClawCheckout(claw.id)
+      window.location.href = url
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to create checkout')
+    } finally {
+      setUpgrading(false)
+    }
+  }, [claw?.id])
 
   async function handleDelete() {
     if (!claw) return
@@ -122,6 +157,32 @@ export default function AgentDetail() {
           <span className="status-dot" /> {statusText}
         </div>
       </div>
+
+      {!claw.paid && claw.trial_ends_at && claw.status === 'running' && (
+        <div style={{ margin: '0 var(--space-md) var(--space-sm)', padding: 'var(--space-sm)', background: 'rgba(255, 200, 0, 0.12)', border: '1px solid rgba(255, 200, 0, 0.3)', borderRadius: 'var(--radius-xs)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+          <span style={{ color: 'var(--text-primary)' }}>Trial {trialRemaining}</span>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={handleUpgrade}
+            disabled={upgrading}
+            style={{ fontSize: '0.75rem', padding: '2px 10px' }}
+          >
+            {upgrading ? '...' : 'Upgrade'}
+          </button>
+        </div>
+      )}
+
+      {claw.paid && (
+        <div style={{ margin: '0 var(--space-md) var(--space-sm)', padding: 'var(--space-xs) var(--space-sm)', fontSize: '0.75rem', color: 'var(--green)' }}>
+          Active subscription
+        </div>
+      )}
+
+      {claw.status === 'stopped' && claw.error_message?.includes('Trial expired') && (
+        <div style={{ margin: '0 var(--space-md) var(--space-sm)', padding: 'var(--space-sm)', background: 'rgba(255, 0, 0, 0.08)', border: '1px solid rgba(255, 0, 0, 0.2)', borderRadius: 'var(--radius-xs)', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+          Trial expired. Redeploy a new claw after upgrading.
+        </div>
+      )}
 
       <div className="agent-info-grid">
         <div className="agent-info-item">

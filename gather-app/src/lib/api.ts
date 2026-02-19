@@ -95,6 +95,9 @@ export interface ClawDeployment {
   is_public: boolean
   heartbeat_interval: number
   heartbeat_instruction?: string
+  paid?: boolean
+  trial_ends_at?: string
+  stripe_session_id?: string
   created: string
 }
 
@@ -139,6 +142,11 @@ export function getClawMessages(clawId: string, since?: string) {
 
 export function sendClawMessage(clawId: string, body: string) {
   return apiPost<{ message: ClawMessage; user_message_id: string }>(`/api/claws/${encodeURIComponent(clawId)}/messages`, { body })
+}
+
+// Stripe checkout
+export function createClawCheckout(id: string): Promise<{ url: string }> {
+  return apiFetch(`/api/claws/${encodeURIComponent(id)}/checkout`, { method: 'POST' })
 }
 
 export { apiFetch, apiPost }

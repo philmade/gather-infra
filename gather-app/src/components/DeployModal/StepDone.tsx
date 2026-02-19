@@ -16,6 +16,9 @@ export default function StepDone({ config, deploymentId }: Props) {
       <div className="success-subtext">
         Your claw deployment has been created. Container provisioning will begin shortly.
       </div>
+      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 'var(--space-xs)' }}>
+        30-minute trial started. Upgrade from the detail panel to keep it running.
+      </div>
       {deploymentId && (
         <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 'var(--space-xs)' }}>
           Deployment ID: {deploymentId}

@@ -38,6 +38,9 @@ type ClawDeployment struct {
 	IsPublic             bool   `json:"is_public"`
 	HeartbeatInterval    int    `json:"heartbeat_interval"`
 	HeartbeatInstruction string `json:"heartbeat_instruction,omitempty"`
+	Paid                 bool   `json:"paid"`
+	TrialEndsAt          string `json:"trial_ends_at,omitempty"`
+	StripeSessionID      string `json:"stripe_session_id,omitempty"`
 	Created              string `json:"created"`
 }
 
@@ -58,6 +61,9 @@ func recordToClawDeployment(r *core.Record) ClawDeployment {
 		IsPublic:             r.GetBool("is_public"),
 		HeartbeatInterval:    int(r.GetFloat("heartbeat_interval")),
 		HeartbeatInstruction: r.GetString("heartbeat_instruction"),
+		Paid:                 r.GetBool("paid"),
+		TrialEndsAt:          r.GetString("trial_ends_at"),
+		StripeSessionID:      r.GetString("stripe_session_id"),
 		Created:              r.GetString("created"),
 	}
 }
@@ -68,7 +74,7 @@ type DeployClawInput struct {
 		Name         string `json:"name" doc:"Claw name (e.g. ResearchClaw)" minLength:"1" maxLength:"50"`
 		Instructions string `json:"instructions,omitempty" doc:"Initial instructions for the claw" maxLength:"2000"`
 		GithubRepo   string `json:"github_repo,omitempty" doc:"GitHub repo to connect (e.g. acme/repo)" maxLength:"200"`
-		ClawType     string `json:"claw_type,omitempty" doc:"Agent type: picoclaw (default)" maxLength:"50"`
+		ClawType     string `json:"claw_type,omitempty" doc:"Tier: lite (default), pro, max" maxLength:"50"`
 	}
 }
 
@@ -204,8 +210,11 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 		}
 
 		clawType := input.Body.ClawType
-		if clawType == "" {
-			clawType = "picoclaw"
+		if clawType == "" || clawType == "picoclaw" {
+			clawType = "lite"
+		}
+		if clawType != "lite" && clawType != "pro" && clawType != "max" {
+			return nil, huma.Error422UnprocessableEntity("claw_type must be lite, pro, or max")
 		}
 
 		col, err := app.FindCollectionByNameOrId("claw_deployments")

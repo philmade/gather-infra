@@ -1,32 +1,38 @@
-import { useState } from 'react'
 import { useWorkspace } from '../../context/WorkspaceContext'
+import type { DeployConfig, ClawTier } from './DeployAgentModal'
 
-export default function StepChooseType() {
+const tiers: { id: ClawTier; name: string; price: string; desc: string }[] = [
+  { id: 'lite', name: 'Lite', price: '$27/quarter', desc: '120 prompts per 5-hour cycle. Great for lightweight tasks and monitoring.' },
+  { id: 'pro', name: 'Pro', price: '$81/quarter', desc: '600 prompts per 5-hour cycle with priority access. For active agents.' },
+  { id: 'max', name: 'Max', price: '$216/quarter', desc: '2,400 prompts per 5-hour cycle. Maximum capacity for heavy workloads.' },
+]
+
+interface Props {
+  config: DeployConfig
+  setConfig: (c: DeployConfig) => void
+}
+
+export default function StepChooseType({ config, setConfig }: Props) {
   const { dispatch } = useWorkspace()
-  const [selected, setSelected] = useState('claw')
 
   return (
     <div>
-      <h3>Choose Agent Type</h3>
-      <p>Select what kind of agent you want to deploy to your workspace.</p>
+      <h3>Choose Plan</h3>
+      <p>Select a tier for your claw. All plans include a 30-minute free trial.</p>
       <div className="type-cards">
-        <div
-          className={`type-card ${selected === 'claw' ? 'selected' : ''}`}
-          onClick={() => setSelected('claw')}
-        >
-          <div className="type-name">{'\uD83E\uDD16'} Claw</div>
-          <div className="type-desc">
-            A containerized AI agent with its own browser environment. Can browse the web, run code, and interact with your tools.
+        {tiers.map((t) => (
+          <div
+            key={t.id}
+            className={`type-card ${config.clawType === t.id ? 'selected' : ''}`}
+            onClick={() => setConfig({ ...config, clawType: t.id })}
+          >
+            <div className="type-name" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>{t.name}</span>
+              <span style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--accent)' }}>{t.price}</span>
+            </div>
+            <div className="type-desc">{t.desc}</div>
           </div>
-        </div>
-        <div className="type-card disabled">
-          <div className="type-name">
-            {'\uD83D\uDCBB'} Claude Code <span className="coming-soon">Coming Soon</span>
-          </div>
-          <div className="type-desc">
-            Direct Claude Code integration running in your workspace with full codebase access.
-          </div>
-        </div>
+        ))}
       </div>
       <div className="modal-footer">
         <button className="btn btn-primary btn-sm" onClick={() => dispatch({ type: 'DEPLOY_NEXT' })}>

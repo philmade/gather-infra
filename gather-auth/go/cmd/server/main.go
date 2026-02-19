@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
@@ -110,6 +111,7 @@ func main() {
 		gatherapi.RegisterAdminRoutes(api, app)
 		gatherapi.RegisterWaitlistRoutes(api, app)
 		gatherapi.RegisterClawRoutes(api, app)
+		gatherapi.RegisterStripeRoutes(api, app)
 
 		tinodeWsURL := os.Getenv("TINODE_WS_URL")
 		if tinodeWsURL == "" {
@@ -121,6 +123,7 @@ func main() {
 		})
 
 		gatherapi.StartHeartbeat(app)
+		gatherapi.StartTrialEnforcer(app)
 
 		// Delegate Huma-managed paths to the Huma mux
 		delegate := func(re *core.RequestEvent) error {
@@ -162,10 +165,17 @@ func main() {
 			"/api/waitlist",
 			"/api/claws",
 			"/api/claws/{path...}",
+			"/api/stripe/{path...}",
 			"/discover",
 		} {
 			e.Router.Any(p, delegate)
 		}
+
+		// --- Stripe webhook (raw body needed for signature verification) ---
+		e.Router.POST("/api/stripe/webhook", func(re *core.RequestEvent) error {
+			gatherapi.HandleStripeWebhookRaw(app).ServeHTTP(re.Response, re.Request)
+			return nil
+		})
 
 		// --- PocketBase-native routes (require PocketBase auth middleware) ---
 
@@ -1344,6 +1354,9 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 	record.Set("subdomain", subdomain)
 	record.Set("status", "provisioning")
 	record.Set("container_id", containerName)
+	record.Set("trial_ends_at", time.Now().Add(30*time.Minute).UTC().Format(time.RFC3339))
+	record.Set("paid", false)
+	record.Set("trial_warned", false)
 	if err := app.Save(record); err != nil {
 		app.Logger().Error("Failed to transition claw to provisioning",
 			"id", record.Id, "error", err)
@@ -1649,6 +1662,22 @@ func ensureClawDeploymentsCollection(app *pocketbase.PocketBase) error {
 			c.Fields.Add(&core.TextField{Name: "last_heartbeat", Max: 30})
 			changed = true
 		}
+		if c.Fields.GetByName("paid") == nil {
+			c.Fields.Add(&core.BoolField{Name: "paid"})
+			changed = true
+		}
+		if c.Fields.GetByName("trial_ends_at") == nil {
+			c.Fields.Add(&core.TextField{Name: "trial_ends_at", Max: 30})
+			changed = true
+		}
+		if c.Fields.GetByName("stripe_session_id") == nil {
+			c.Fields.Add(&core.TextField{Name: "stripe_session_id", Max: 200})
+			changed = true
+		}
+		if c.Fields.GetByName("trial_warned") == nil {
+			c.Fields.Add(&core.BoolField{Name: "trial_warned"})
+			changed = true
+		}
 		if changed {
 			if err := app.Save(c); err != nil {
 				return fmt.Errorf("migrate claw_deployments collection: %w", err)
@@ -1676,6 +1705,10 @@ func ensureClawDeploymentsCollection(app *pocketbase.PocketBase) error {
 		&core.NumberField{Name: "heartbeat_interval"},
 		&core.TextField{Name: "heartbeat_instruction", Max: 2000},
 		&core.TextField{Name: "last_heartbeat", Max: 30},
+		&core.BoolField{Name: "paid"},
+		&core.TextField{Name: "trial_ends_at", Max: 30},
+		&core.TextField{Name: "stripe_session_id", Max: 200},
+		&core.BoolField{Name: "trial_warned"},
 		&core.AutodateField{Name: "created", OnCreate: true},
 	)
 	c.AddIndex("idx_claw_user", false, "user_id", "")

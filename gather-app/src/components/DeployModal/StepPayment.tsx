@@ -1,12 +1,19 @@
 import { useWorkspace } from '../../context/WorkspaceContext'
 import type { DeployConfig } from './DeployAgentModal'
 
+const tierLabels: Record<string, { name: string; price: string }> = {
+  lite: { name: 'Claw Lite', price: '$27/quarter' },
+  pro: { name: 'Claw Pro', price: '$81/quarter' },
+  max: { name: 'Claw Max', price: '$216/quarter' },
+}
+
 interface Props {
   config: DeployConfig
 }
 
 export default function StepPayment({ config }: Props) {
   const { dispatch } = useWorkspace()
+  const tier = tierLabels[config.clawType] || tierLabels.lite
 
   return (
     <div>
@@ -18,16 +25,19 @@ export default function StepPayment({ config }: Props) {
           <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{config.name || 'Unnamed'}</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-sm)' }}>
-          <span style={{ color: 'var(--text-secondary)' }}>Type</span>
-          <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>PicoClaw</span>
+          <span style={{ color: 'var(--text-secondary)' }}>Plan</span>
+          <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{tier.name}</span>
         </div>
         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 'var(--space-sm)' }}>
           <span style={{ color: 'var(--text-secondary)' }}>LLM Backend</span>
           <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>GLM-5 (z.ai)</span>
         </div>
         <div style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-sm)', display: 'flex', justifyContent: 'space-between' }}>
-          <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Pricing</span>
-          <span style={{ color: 'var(--accent)', fontWeight: 700, fontSize: '0.85rem' }}>Free during beta</span>
+          <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>Price</span>
+          <span style={{ color: 'var(--accent)', fontWeight: 700, fontSize: '0.85rem' }}>{tier.price}</span>
+        </div>
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: 'var(--space-xs)' }}>
+          30-minute free trial. Your claw deploys immediately. Upgrade from the detail panel to keep it running.
         </div>
       </div>
       {config.instructions && (

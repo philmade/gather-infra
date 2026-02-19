@@ -7,10 +7,13 @@ import StepPayment from './StepPayment'
 import StepDeploying from './StepDeploying'
 import StepDone from './StepDone'
 
+export type ClawTier = 'lite' | 'pro' | 'max'
+
 export interface DeployConfig {
   name: string
   instructions: string
   githubRepo: string
+  clawType: ClawTier
 }
 
 export default function DeployAgentModal() {
@@ -21,13 +24,14 @@ export default function DeployAgentModal() {
     name: '',
     instructions: '',
     githubRepo: '',
+    clawType: 'lite',
   })
   const [deploymentId, setDeploymentId] = useState<string | null>(null)
 
   // Reset config when modal opens
   useEffect(() => {
     if (open) {
-      setConfig({ name: '', instructions: '', githubRepo: '' })
+      setConfig({ name: '', instructions: '', githubRepo: '', clawType: 'lite' })
       setDeploymentId(null)
     }
   }, [open])
@@ -57,7 +61,7 @@ export default function DeployAgentModal() {
           <button className="modal-close" onClick={() => dispatch({ type: 'CLOSE_DEPLOY' })}>&times;</button>
         </div>
         <StepIndicator currentStep={step} />
-        {step === 1 && <StepChooseType />}
+        {step === 1 && <StepChooseType config={config} setConfig={setConfig} />}
         {step === 2 && <StepConfigure config={config} setConfig={setConfig} />}
         {step === 3 && <StepPayment config={config} />}
         {step === 4 && <StepDeploying config={config} onDeployed={setDeploymentId} />}

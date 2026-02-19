@@ -100,6 +100,11 @@ services:
       CLAW_LLM_API_KEY: ${CLAW_LLM_API_KEY}
       CLAW_LLM_API_URL: ${CLAW_LLM_API_URL}
       CLAW_LLM_MODEL: ${CLAW_LLM_MODEL}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      STRIPE_PRICE_LITE: ${STRIPE_PRICE_LITE}
+      STRIPE_PRICE_PRO: ${STRIPE_PRICE_PRO}
+      STRIPE_PRICE_MAX: ${STRIPE_PRICE_MAX}
     volumes:
       - pocketbase_data:/pb_data
       - /var/run/docker.sock:/var/run/docker.sock

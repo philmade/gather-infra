@@ -27,7 +27,7 @@ export default function StepDeploying({ config, onDeployed }: Props) {
             name: config.name.trim(),
             instructions: config.instructions.trim(),
             github_repo: config.githubRepo.trim(),
-            claw_type: 'picoclaw',
+            claw_type: config.clawType || 'lite',
           }),
         })
 

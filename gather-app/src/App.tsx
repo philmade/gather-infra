@@ -11,6 +11,7 @@ import DeployAgentModal from './components/DeployModal/DeployAgentModal'
 import SettingsView from './components/Settings/SettingsView'
 import WorkspaceOnboarding from './components/Onboarding/WorkspaceOnboarding'
 import { useWorkspace } from './context/WorkspaceContext'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 
 function ChatGate({ children }: { children: ReactNode }) {
@@ -44,8 +45,48 @@ function ChatGate({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
+function StripeToast({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 5000)
+    return () => clearTimeout(t)
+  }, [onDismiss])
+
+  return (
+    <div style={{
+      position: 'fixed', top: 16, right: 16, zIndex: 10000,
+      padding: '12px 20px', borderRadius: 8,
+      background: 'var(--bg-secondary)', border: '1px solid var(--border)',
+      boxShadow: '0 4px 12px rgba(0,0,0,0.3)', fontSize: '0.85rem',
+      color: 'var(--text-primary)', cursor: 'pointer',
+    }} onClick={onDismiss}>
+      {message}
+    </div>
+  )
+}
+
 function WorkspaceLayout() {
   const { state } = useWorkspace()
+  const [stripeToast, setStripeToast] = useState<string | null>(null)
+
+  // Handle Stripe redirect return
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search)
+    const stripeResult = params.get('stripe')
+    if (!stripeResult) return
+
+    if (stripeResult === 'success') {
+      setStripeToast('Payment successful! Your claw is now active.')
+    } else if (stripeResult === 'cancel') {
+      setStripeToast('Checkout cancelled. You can upgrade later from the detail panel.')
+    }
+
+    // Clean up URL params
+    params.delete('stripe')
+    params.delete('claw')
+    const clean = params.toString()
+    const newUrl = window.location.pathname + (clean ? '?' + clean : '')
+    window.history.replaceState({}, '', newUrl)
+  }, [])
 
   const workspaceClass = [
     'workspace',
@@ -64,6 +105,7 @@ function WorkspaceLayout() {
       <WebTopFullscreen />
       <DeployAgentModal />
       <SettingsView />
+      {stripeToast && <StripeToast message={stripeToast} onDismiss={() => setStripeToast(null)} />}
     </>
   )
 }
