@@ -5,10 +5,12 @@
 /* ===== Layout ===== */
 
 .landing {
-  min-height: 100vh;
+  position: fixed;
+  inset: 0;
   background: var(--bg-primary);
   color: var(--text-primary);
   overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .landing-nav {
