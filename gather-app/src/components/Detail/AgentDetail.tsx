@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useWorkspace } from '../../context/WorkspaceContext'
 import { pb } from '../../lib/pocketbase'
+import { updateClawSettings } from '../../lib/api'
 
 interface ClawDetail {
   id: string
@@ -13,6 +14,9 @@ interface ClawDetail {
   instructions?: string
   github_repo?: string
   error_message?: string
+  is_public: boolean
+  heartbeat_interval: number
+  heartbeat_instruction?: string
   created: string
 }
 
@@ -28,6 +32,10 @@ export default function AgentDetail() {
   const { state, dispatch } = useWorkspace()
   const [claw, setClaw] = useState<ClawDetail | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [isPublic, setIsPublic] = useState(true)
+  const [heartbeatInterval, setHeartbeatInterval] = useState(0)
+  const [heartbeatInstruction, setHeartbeatInstruction] = useState('')
 
   useEffect(() => {
     if (!state.selectedAgent) return
@@ -37,7 +45,11 @@ export default function AgentDetail() {
           headers: { Authorization: `Bearer ${pb.authStore.token}` },
         })
         if (resp.ok) {
-          setClaw(await resp.json())
+          const data = await resp.json()
+          setClaw(data)
+          setIsPublic(data.is_public ?? true)
+          setHeartbeatInterval(data.heartbeat_interval ?? 0)
+          setHeartbeatInstruction(data.heartbeat_instruction ?? '')
         }
       } catch {
         // ignore
@@ -63,6 +75,29 @@ export default function AgentDetail() {
       setDeleting(false)
     }
   }
+
+  async function handleSaveSettings() {
+    if (!claw) return
+    setSaving(true)
+    try {
+      const updated = await updateClawSettings(claw.id, {
+        is_public: isPublic,
+        heartbeat_interval: heartbeatInterval,
+        heartbeat_instruction: heartbeatInstruction,
+      })
+      setClaw(updated as unknown as ClawDetail)
+    } catch {
+      // ignore
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const settingsChanged = claw && (
+    isPublic !== (claw.is_public ?? true) ||
+    heartbeatInterval !== (claw.heartbeat_interval ?? 0) ||
+    heartbeatInstruction !== (claw.heartbeat_instruction ?? '')
+  )
 
   if (!claw) {
     return (
@@ -141,6 +176,63 @@ export default function AgentDetail() {
           {claw.error_message}
         </div>
       )}
+
+      <div style={{ marginBottom: 'var(--space-md)' }}>
+        <div style={{ fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 'var(--space-sm)' }}>
+          Settings
+        </div>
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-xs)', fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: 'var(--space-sm)', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={isPublic}
+            onChange={(e) => setIsPublic(e.target.checked)}
+          />
+          Public page
+          <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>(anyone with the link can view)</span>
+        </label>
+
+        <div style={{ marginBottom: 'var(--space-sm)' }}>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>Heartbeat</div>
+          <select
+            value={heartbeatInterval}
+            onChange={(e) => setHeartbeatInterval(Number(e.target.value))}
+            style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', fontSize: '0.8rem', background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)' }}
+          >
+            <option value={0}>Off</option>
+            <option value={15}>Every 15 min</option>
+            <option value={30}>Every 30 min</option>
+            <option value={60}>Every hour</option>
+            <option value={360}>Every 6 hours</option>
+            <option value={1440}>Every 24 hours</option>
+          </select>
+        </div>
+
+        {heartbeatInterval > 0 && (
+          <div style={{ marginBottom: 'var(--space-sm)' }}>
+            <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>Heartbeat instruction</div>
+            <textarea
+              value={heartbeatInstruction}
+              onChange={(e) => setHeartbeatInstruction(e.target.value)}
+              placeholder="Check your notifications and update your public page with anything interesting."
+              maxLength={2000}
+              rows={3}
+              style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', fontSize: '0.8rem', background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)', resize: 'vertical', fontFamily: 'inherit' }}
+            />
+          </div>
+        )}
+
+        {settingsChanged && (
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={handleSaveSettings}
+            disabled={saving}
+            style={{ width: '100%' }}
+          >
+            {saving ? 'Saving...' : 'Save Settings'}
+          </button>
+        )}
+      </div>
 
       <div className="agent-actions">
         {claw.status === 'running' && claw.url && (

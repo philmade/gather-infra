@@ -23,36 +23,42 @@ import (
 // -----------------------------------------------------------------------------
 
 type ClawDeployment struct {
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Status       string `json:"status"`
-	Instructions string `json:"instructions,omitempty"`
-	GithubRepo   string `json:"github_repo,omitempty"`
-	ClawType     string `json:"claw_type"`
-	UserID       string `json:"user_id"`
-	Subdomain    string `json:"subdomain,omitempty"`
-	ContainerID  string `json:"container_id,omitempty"`
-	URL          string `json:"url,omitempty"`
-	Port         int    `json:"port,omitempty"`
-	ErrorMessage string `json:"error_message,omitempty"`
-	Created      string `json:"created"`
+	ID                   string `json:"id"`
+	Name                 string `json:"name"`
+	Status               string `json:"status"`
+	Instructions         string `json:"instructions,omitempty"`
+	GithubRepo           string `json:"github_repo,omitempty"`
+	ClawType             string `json:"claw_type"`
+	UserID               string `json:"user_id"`
+	Subdomain            string `json:"subdomain,omitempty"`
+	ContainerID          string `json:"container_id,omitempty"`
+	URL                  string `json:"url,omitempty"`
+	Port                 int    `json:"port,omitempty"`
+	ErrorMessage         string `json:"error_message,omitempty"`
+	IsPublic             bool   `json:"is_public"`
+	HeartbeatInterval    int    `json:"heartbeat_interval"`
+	HeartbeatInstruction string `json:"heartbeat_instruction,omitempty"`
+	Created              string `json:"created"`
 }
 
 func recordToClawDeployment(r *core.Record) ClawDeployment {
 	return ClawDeployment{
-		ID:           r.Id,
-		Name:         r.GetString("name"),
-		Status:       r.GetString("status"),
-		Instructions: r.GetString("instructions"),
-		GithubRepo:   r.GetString("github_repo"),
-		ClawType:     r.GetString("claw_type"),
-		UserID:       r.GetString("user_id"),
-		Subdomain:    r.GetString("subdomain"),
-		ContainerID:  r.GetString("container_id"),
-		URL:          r.GetString("url"),
-		Port:         int(r.GetFloat("port")),
-		ErrorMessage: r.GetString("error_message"),
-		Created:      r.GetString("created"),
+		ID:                   r.Id,
+		Name:                 r.GetString("name"),
+		Status:               r.GetString("status"),
+		Instructions:         r.GetString("instructions"),
+		GithubRepo:           r.GetString("github_repo"),
+		ClawType:             r.GetString("claw_type"),
+		UserID:               r.GetString("user_id"),
+		Subdomain:            r.GetString("subdomain"),
+		ContainerID:          r.GetString("container_id"),
+		URL:                  r.GetString("url"),
+		Port:                 int(r.GetFloat("port")),
+		ErrorMessage:         r.GetString("error_message"),
+		IsPublic:             r.GetBool("is_public"),
+		HeartbeatInterval:    int(r.GetFloat("heartbeat_interval")),
+		HeartbeatInstruction: r.GetString("heartbeat_instruction"),
+		Created:              r.GetString("created"),
 	}
 }
 
@@ -121,6 +127,20 @@ type DeleteClawOutput struct {
 	Body struct {
 		OK bool `json:"ok"`
 	}
+}
+
+type UpdateClawSettingsInput struct {
+	Authorization string `header:"Authorization" doc:"Bearer PocketBase auth token" required:"true"`
+	ID            string `path:"id" doc:"Deployment ID"`
+	Body          struct {
+		IsPublic             *bool   `json:"is_public,omitempty" doc:"Whether subdomain page is public"`
+		HeartbeatInterval    *int    `json:"heartbeat_interval,omitempty" doc:"Minutes between heartbeats (0=off, 15, 30, 60, 360, 1440)"`
+		HeartbeatInstruction *string `json:"heartbeat_instruction,omitempty" doc:"Instruction sent with each heartbeat" maxLength:"2000"`
+	}
+}
+
+type UpdateClawSettingsOutput struct {
+	Body ClawDeployment
 }
 
 type ClawMessagesInput struct {
@@ -376,6 +396,52 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 			out.Body.Claws = append(out.Body.Claws, recordToClawDeployment(r))
 		}
 		out.Body.Total = len(out.Body.Claws)
+		return out, nil
+	})
+
+	// PATCH /api/claws/{id} — update claw settings
+	huma.Register(api, huma.Operation{
+		OperationID: "update-claw-settings",
+		Method:      "PATCH",
+		Path:        "/api/claws/{id}",
+		Summary:     "Update Claw settings",
+		Description: "Update claw settings (heartbeat, public page). Only the owning user can update.",
+		Tags:        []string{"Claws"},
+	}, func(ctx context.Context, input *UpdateClawSettingsInput) (*UpdateClawSettingsOutput, error) {
+		userID, err := extractPBUserID(app, input.Authorization)
+		if err != nil {
+			return nil, huma.Error401Unauthorized("Authentication required")
+		}
+
+		record, err := app.FindRecordById("claw_deployments", input.ID)
+		if err != nil {
+			return nil, huma.Error404NotFound("Deployment not found")
+		}
+		if record.GetString("user_id") != userID {
+			return nil, huma.Error404NotFound("Deployment not found")
+		}
+
+		if input.Body.IsPublic != nil {
+			record.Set("is_public", *input.Body.IsPublic)
+		}
+		if input.Body.HeartbeatInterval != nil {
+			v := *input.Body.HeartbeatInterval
+			allowed := map[int]bool{0: true, 15: true, 30: true, 60: true, 360: true, 1440: true}
+			if !allowed[v] {
+				return nil, huma.Error422UnprocessableEntity("heartbeat_interval must be 0, 15, 30, 60, 360, or 1440")
+			}
+			record.Set("heartbeat_interval", v)
+		}
+		if input.Body.HeartbeatInstruction != nil {
+			record.Set("heartbeat_instruction", *input.Body.HeartbeatInstruction)
+		}
+
+		if err := app.Save(record); err != nil {
+			return nil, huma.Error500InternalServerError("Failed to update settings")
+		}
+
+		out := &UpdateClawSettingsOutput{}
+		out.Body = recordToClawDeployment(record)
 		return out, nil
 	})
 

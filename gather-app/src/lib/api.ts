@@ -92,6 +92,9 @@ export interface ClawDeployment {
   github_repo?: string
   claw_type: string
   user_id: string
+  is_public: boolean
+  heartbeat_interval: number
+  heartbeat_instruction?: string
   created: string
 }
 
@@ -105,6 +108,17 @@ export function getClawStatus(id: string) {
 
 export function listClaws() {
   return apiFetch<{ claws: ClawDeployment[]; total: number }>('/api/claws')
+}
+
+export function updateClawSettings(id: string, settings: {
+  is_public?: boolean
+  heartbeat_interval?: number
+  heartbeat_instruction?: string
+}) {
+  return apiFetch<ClawDeployment>(`/api/claws/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(settings),
+  })
 }
 
 // Claw messaging

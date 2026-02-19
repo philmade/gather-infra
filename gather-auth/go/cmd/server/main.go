@@ -120,6 +120,8 @@ func main() {
 			PwdSecret: os.Getenv("TINODE_PASSWORD_SECRET"),
 		})
 
+		gatherapi.StartHeartbeat(app)
+
 		// Delegate Huma-managed paths to the Huma mux
 		delegate := func(re *core.RequestEvent) error {
 			mux.ServeHTTP(re.Response, re.Request)
@@ -1631,6 +1633,22 @@ func ensureClawDeploymentsCollection(app *pocketbase.PocketBase) error {
 			c.Fields.Add(&core.TextField{Name: "agent_id", Max: 50})
 			changed = true
 		}
+		if c.Fields.GetByName("is_public") == nil {
+			c.Fields.Add(&core.BoolField{Name: "is_public"})
+			changed = true
+		}
+		if c.Fields.GetByName("heartbeat_interval") == nil {
+			c.Fields.Add(&core.NumberField{Name: "heartbeat_interval"})
+			changed = true
+		}
+		if c.Fields.GetByName("heartbeat_instruction") == nil {
+			c.Fields.Add(&core.TextField{Name: "heartbeat_instruction", Max: 2000})
+			changed = true
+		}
+		if c.Fields.GetByName("last_heartbeat") == nil {
+			c.Fields.Add(&core.TextField{Name: "last_heartbeat", Max: 30})
+			changed = true
+		}
 		if changed {
 			if err := app.Save(c); err != nil {
 				return fmt.Errorf("migrate claw_deployments collection: %w", err)
@@ -1654,6 +1672,10 @@ func ensureClawDeploymentsCollection(app *pocketbase.PocketBase) error {
 		&core.NumberField{Name: "port"},
 		&core.TextField{Name: "error_message", Max: 500},
 		&core.TextField{Name: "agent_id", Max: 50},
+		&core.BoolField{Name: "is_public"},
+		&core.NumberField{Name: "heartbeat_interval"},
+		&core.TextField{Name: "heartbeat_instruction", Max: 2000},
+		&core.TextField{Name: "last_heartbeat", Max: 30},
 		&core.AutodateField{Name: "created", OnCreate: true},
 	)
 	c.AddIndex("idx_claw_user", false, "user_id", "")
