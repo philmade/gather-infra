@@ -74,30 +74,40 @@ func RegisterStripeRoutes(api huma.API, app *pocketbase.PocketBase) {
 // POST /api/claws/{id}/checkout
 // -----------------------------------------------------------------------------
 
+// stripeEnv returns a Stripe env var, using _TEST suffixed vars when STRIPE_MODE=test.
+func stripeEnv(key string) string {
+	if os.Getenv("STRIPE_MODE") == "test" {
+		if v := os.Getenv(key + "_TEST"); v != "" {
+			return v
+		}
+	}
+	return os.Getenv(key)
+}
+
 // clawPriceID returns the Stripe Price ID for a claw tier.
-// Env vars: STRIPE_PRICE_LITE, STRIPE_PRICE_PRO, STRIPE_PRICE_MAX
 func clawPriceID(clawType string) string {
 	switch clawType {
 	case "pro":
-		return os.Getenv("STRIPE_PRICE_PRO")
+		return stripeEnv("STRIPE_PRICE_PRO")
 	case "max":
-		return os.Getenv("STRIPE_PRICE_MAX")
+		return stripeEnv("STRIPE_PRICE_MAX")
 	default: // "lite", "picoclaw", ""
-		return os.Getenv("STRIPE_PRICE_LITE")
+		return stripeEnv("STRIPE_PRICE_LITE")
 	}
 }
 
 func CreateCheckoutSession(app *pocketbase.PocketBase) func(ctx context.Context, input *CreateCheckoutInput) (*CreateCheckoutOutput, error) {
 	return func(ctx context.Context, input *CreateCheckoutInput) (*CreateCheckoutOutput, error) {
-		stripeKey := os.Getenv("STRIPE_SECRET_KEY")
+		stripeKey := stripeEnv("STRIPE_SECRET_KEY")
 		if stripeKey == "" {
 			return nil, huma.Error500InternalServerError("Stripe not configured")
 		}
 
-		userID, err := extractPBUserID(app, input.Authorization)
+		userRecord, err := extractPBUserRecord(app, input.Authorization)
 		if err != nil {
 			return nil, huma.Error401Unauthorized("Authentication required")
 		}
+		userID := userRecord.Id
 
 		record, err := app.FindRecordById("claw_deployments", input.ID)
 		if err != nil {
@@ -131,6 +141,11 @@ func CreateCheckoutSession(app *pocketbase.PocketBase) func(ctx context.Context,
 		form.Set("metadata[claw_id]", input.ID)
 		form.Set("metadata[user_id]", userID)
 		form.Set("client_reference_id", input.ID)
+
+		// Pre-fill email so user doesn't have to re-enter it
+		if email := userRecord.GetString("email"); email != "" {
+			form.Set("customer_email", email)
+		}
 
 		req, _ := http.NewRequestWithContext(ctx, "POST",
 			"https://api.stripe.com/v1/checkout/sessions",
@@ -192,7 +207,7 @@ func HandleStripeWebhook(app *pocketbase.PocketBase) func(ctx context.Context, i
 // and verifies the Stripe signature. Wired as a PocketBase-native route.
 func HandleStripeWebhookRaw(app *pocketbase.PocketBase) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		webhookSecret := os.Getenv("STRIPE_WEBHOOK_SECRET")
+		webhookSecret := stripeEnv("STRIPE_WEBHOOK_SECRET")
 		if webhookSecret == "" {
 			app.Logger().Warn("STRIPE_WEBHOOK_SECRET not set, rejecting webhook")
 			http.Error(w, "Webhook not configured", http.StatusInternalServerError)
