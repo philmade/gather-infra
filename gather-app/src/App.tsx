@@ -70,10 +70,17 @@ function WorkspaceLayout() {
   const [stripeToast, setStripeToast] = useState<string | null>(null)
   const checkedClaws = useRef(false)
 
-  // Auto-open deploy modal for new users with zero claws
+  // Auto-open deploy modal for new users with zero claws (or ?preview=deploy)
   useEffect(() => {
     if (checkedClaws.current) return
     checkedClaws.current = true
+
+    const preview = new URLSearchParams(window.location.search).get('preview')
+    if (preview === 'deploy') {
+      dispatch({ type: 'OPEN_DEPLOY' })
+      return
+    }
+
     listClaws()
       .then(data => {
         if (!data.claws || data.claws.length === 0) {

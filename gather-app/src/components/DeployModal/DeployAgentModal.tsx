@@ -1,19 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useWorkspace } from '../../context/WorkspaceContext'
 import StepIndicator from './StepIndicator'
-import StepChooseType from './StepChooseType'
 import StepConfigure from './StepConfigure'
-import StepPayment from './StepPayment'
 import StepDeploying from './StepDeploying'
 import StepDone from './StepDone'
-
-export type ClawTier = 'lite' | 'pro' | 'max'
 
 export interface DeployConfig {
   name: string
   instructions: string
-  githubRepo: string
-  clawType: ClawTier
 }
 
 export default function DeployAgentModal() {
@@ -23,15 +17,13 @@ export default function DeployAgentModal() {
   const [config, setConfig] = useState<DeployConfig>({
     name: '',
     instructions: '',
-    githubRepo: '',
-    clawType: 'lite',
   })
   const [deploymentId, setDeploymentId] = useState<string | null>(null)
 
   // Reset config when modal opens
   useEffect(() => {
     if (open) {
-      setConfig({ name: '', instructions: '', githubRepo: '', clawType: 'lite' })
+      setConfig({ name: '', instructions: '' })
       setDeploymentId(null)
     }
   }, [open])
@@ -57,15 +49,13 @@ export default function DeployAgentModal() {
     >
       <div className="modal-container">
         <div className="modal-header">
-          <span className="modal-title">Deploy a Claw</span>
+          <span className="modal-title">Try a Claw — Free for 30 minutes</span>
           <button className="modal-close" onClick={() => dispatch({ type: 'CLOSE_DEPLOY' })}>&times;</button>
         </div>
-        <StepIndicator currentStep={step} />
-        {step === 1 && <StepChooseType config={config} setConfig={setConfig} />}
-        {step === 2 && <StepConfigure config={config} setConfig={setConfig} />}
-        {step === 3 && <StepPayment config={config} />}
-        {step === 4 && <StepDeploying config={config} onDeployed={setDeploymentId} />}
-        {step === 5 && <StepDone config={config} deploymentId={deploymentId} />}
+        <StepIndicator currentStep={step} totalSteps={3} />
+        {step === 1 && <StepConfigure config={config} setConfig={setConfig} />}
+        {step === 2 && <StepDeploying config={config} onDeployed={setDeploymentId} />}
+        {step === 3 && <StepDone config={config} deploymentId={deploymentId} />}
       </div>
     </div>
   )

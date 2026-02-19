@@ -3,6 +3,8 @@ import { useAuth } from '../../context/AuthContext'
 import LoginScreen from './LoginScreen'
 import LandingPage from '../Landing/LandingPage'
 
+const previewParam = new URLSearchParams(window.location.search).get('preview')
+
 export default function AuthGate({ children }: { children: ReactNode }) {
   const { state } = useAuth()
   const [showLogin, setShowLogin] = useState(false)
@@ -15,6 +17,11 @@ export default function AuthGate({ children }: { children: ReactNode }) {
         </div>
       </div>
     )
+  }
+
+  // ?preview=landing — show landing page even when logged in
+  if (previewParam === 'landing') {
+    return <LandingPage onSignIn={() => setShowLogin(true)} />
   }
 
   if (!state.isAuthenticated) {

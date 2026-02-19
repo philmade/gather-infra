@@ -66,7 +66,7 @@ function reducer(state: WorkspaceState, action: WorkspaceAction): WorkspaceState
     case 'CLOSE_DEPLOY':
       return { ...state, deployModal: { open: false, step: 1 } }
     case 'DEPLOY_NEXT':
-      return { ...state, deployModal: { ...state.deployModal, step: Math.min(state.deployModal.step + 1, 5) } }
+      return { ...state, deployModal: { ...state.deployModal, step: Math.min(state.deployModal.step + 1, 3) } }
     case 'DEPLOY_PREV':
       return { ...state, deployModal: { ...state.deployModal, step: Math.max(state.deployModal.step - 1, 1) } }
     case 'DEPLOY_SET_STEP':

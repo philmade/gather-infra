@@ -26,8 +26,7 @@ export default function StepDeploying({ config, onDeployed }: Props) {
           body: JSON.stringify({
             name: config.name.trim(),
             instructions: config.instructions.trim(),
-            github_repo: config.githubRepo.trim(),
-            claw_type: config.clawType || 'lite',
+            claw_type: 'lite',
           }),
         })
 
@@ -42,7 +41,7 @@ export default function StepDeploying({ config, onDeployed }: Props) {
         if (cancelled) return
 
         onDeployed(data.id)
-        dispatch({ type: 'DEPLOY_SET_STEP', step: 5 })
+        dispatch({ type: 'DEPLOY_SET_STEP', step: 3 })
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : String(err))
@@ -70,7 +69,7 @@ export default function StepDeploying({ config, onDeployed }: Props) {
       <div className="loading-spinner spinner-lg progress-spinner" style={{ borderTopColor: 'var(--accent)' }} />
       <div className="progress-text">Deploying {config.name}...</div>
       <div style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: 'var(--space-sm)' }}>
-        Creating deployment record and queuing container provisioning
+        Setting up your container. This takes a few seconds.
       </div>
     </div>
   )
