@@ -42,14 +42,27 @@ if [ ! -f /app/soul/SOUL.md ]; then
     echo "# Identity" > /app/soul/IDENTITY.md
 fi
 
-# --- Start clawpoint-go ---
-echo "Starting clawpoint-go..."
-./clawpoint-go web api webui > /tmp/adk-go.log 2>&1 &
+# --- Public page (copy defaults on first boot) ---
+if [ ! -f /app/public/index.html ]; then
+    cp /app/public-default/* /app/public/ 2>/dev/null || true
+fi
+
+# --- Port layout: proxy on :8080 (public), ADK on :8081 (internal) ---
+export ADK_PORT=8081
+
+# --- Start clawpoint-go (internal, port 8081) ---
+echo "Starting clawpoint-go on :${ADK_PORT}..."
+PORT=${ADK_PORT} ./clawpoint-go web api webui > /tmp/adk-go.log 2>&1 &
+
+# --- Start proxy (public-facing, port 8080 → ADK on 8081) ---
+echo "Starting clawpoint-proxy on :8080..."
+PROXY_ADDR=":8080" ADK_INTERNAL="http://127.0.0.1:${ADK_PORT}" PUBLIC_DIR="/app/public" \
+    ./clawpoint-proxy > /tmp/proxy.log 2>&1 &
 
 # --- Start bridge (if matterbridge running) ---
 if [ -n "$TELEGRAM_BOT" ]; then
     echo "Starting clawpoint-bridge..."
-    ./clawpoint-bridge > /tmp/bridge.log 2>&1 &
+    ADK_URL="http://127.0.0.1:${ADK_PORT}" ./clawpoint-bridge > /tmp/bridge.log 2>&1 &
 fi
 
 # --- Medic as foreground supervisor ---

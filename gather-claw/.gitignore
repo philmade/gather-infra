@@ -1,8 +1,12 @@
 # Secrets & credentials
 .gather/keys/
 
-# ClawPoint-Go source (synced from external repo, not committed)
-clawpoint-go/
+# ClawPoint-Go compiled binaries (source is committed, binaries are not)
+clawpoint-go/clawpoint-go
+clawpoint-go/clawpoint-medic
+clawpoint-go/clawpoint-bridge
+clawpoint-go/clawpoint-proxy
+clawpoint-go/*.db
 
 # Dev data volumes
 dev-data/
