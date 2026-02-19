@@ -47,14 +47,14 @@ func adkPort() string {
 var agents = map[string]agentConfig{
 	"clawpoint-go": {
 		LogFile:        "/tmp/adk-go.log",
-		WorkingDir:     projectRoot() + "/clawpoint-go",
+		WorkingDir:     projectRoot(),
 		HealthURL:      "http://127.0.0.1:" + adkPort(),
 		ProcessPattern: "clawpoint-go web",
-		RestartCmd:     "cd " + projectRoot() + " && PORT=" + adkPort() + " ./clawpoint-go web api webui > /tmp/adk-go.log 2>&1",
+		RestartCmd:     "cd " + projectRoot() + " && ./clawpoint-go web -port " + adkPort() + " api webui > /tmp/adk-go.log 2>&1",
 	},
 	"clawpoint-bridge": {
 		LogFile:        "/tmp/bridge.log",
-		WorkingDir:     projectRoot() + "/clawpoint-go",
+		WorkingDir:     projectRoot(),
 		ProcessPattern: "clawpoint-bridge",
 		RestartCmd:     "cd " + projectRoot() + " && ADK_URL=http://127.0.0.1:" + adkPort() + " ./clawpoint-bridge > /tmp/bridge.log 2>&1",
 	},

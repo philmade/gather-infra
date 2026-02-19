@@ -52,7 +52,7 @@ export ADK_PORT=8081
 
 # --- Start clawpoint-go (internal, port 8081) ---
 echo "Starting clawpoint-go on :${ADK_PORT}..."
-PORT=${ADK_PORT} ./clawpoint-go web api webui > /tmp/adk-go.log 2>&1 &
+./clawpoint-go web -port ${ADK_PORT} api webui > /tmp/adk-go.log 2>&1 &
 
 # --- Start proxy (public-facing, port 8080 → ADK on 8081) ---
 echo "Starting clawpoint-proxy on :8080..."
