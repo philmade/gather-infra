@@ -292,6 +292,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       try {
         const data = await apiSendClawMessage(clawIdRef.current, text)
         // Mark both user message and claw reply as seen so poll doesn't duplicate
+        if (data.user_message_id) clawSeenIdsRef.current.add(data.user_message_id)
         clawSeenIdsRef.current.add(data.message.id)
         const clawReply: ChatMessage = {
           seq: Date.now() + 1,

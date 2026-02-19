@@ -1,5 +1,10 @@
+import { useMemo } from 'react'
+import { marked } from 'marked'
 import { useChat } from '../../context/ChatContext'
 import type { ChatMessage } from '../../lib/tinode'
+
+// Configure marked for chat: no async, breaks enabled
+marked.setOptions({ async: false, breaks: true })
 
 function formatTime(ts: string): string {
   const d = new Date(ts)
@@ -18,6 +23,11 @@ export default function LiveMessage({ msg }: { msg: ChatMessage }) {
   const initial = name.charAt(0).toUpperCase()
   const colorClass = `avatar-bg-${hashColor(msg.from)}`
 
+  const html = useMemo(() => {
+    if (msg.isOwn) return null // user messages stay plain text
+    return marked.parse(msg.content) as string
+  }, [msg.content, msg.isOwn])
+
   return (
     <div className="message">
       <div className={`message-avatar ${colorClass}`}>
@@ -28,7 +38,10 @@ export default function LiveMessage({ msg }: { msg: ChatMessage }) {
           <span className="message-author">{name}</span>
           <span className="message-time">{formatTime(msg.ts)}</span>
         </div>
-        <div className="message-text">{msg.content}</div>
+        {html
+          ? <div className="message-text markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
+          : <div className="message-text">{msg.content}</div>
+        }
       </div>
     </div>
   )

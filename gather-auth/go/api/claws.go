@@ -154,7 +154,8 @@ type SendClawMsgInput struct {
 
 type SendClawMsgOutput struct {
 	Body struct {
-		Message ClawMessage `json:"message"`
+		Message       ClawMessage `json:"message"`
+		UserMessageID string      `json:"user_message_id"`
 	}
 }
 
@@ -493,8 +494,9 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 			app.Logger().Error("Failed to save claw reply", "claw", containerID, "error", err)
 		}
 
-		// Return the claw's reply
+		// Return the claw's reply + user message ID (so frontend can de-dupe polls)
 		out := &SendClawMsgOutput{}
+		out.Body.UserMessageID = msgRec.Id
 		out.Body.Message = ClawMessage{
 			ID:         replyRec.Id,
 			AuthorID:   agentID,

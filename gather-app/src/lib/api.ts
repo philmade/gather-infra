@@ -124,7 +124,7 @@ export function getClawMessages(clawId: string, since?: string) {
 }
 
 export function sendClawMessage(clawId: string, body: string) {
-  return apiPost<{ message: ClawMessage }>(`/api/claws/${encodeURIComponent(clawId)}/messages`, { body })
+  return apiPost<{ message: ClawMessage; user_message_id: string }>(`/api/claws/${encodeURIComponent(clawId)}/messages`, { body })
 }
 
 export { apiFetch, apiPost }
