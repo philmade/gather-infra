@@ -42,3 +42,19 @@ Thumbs.db
 
 # Claude session data
 .claude/
+.architecture-mapper-state.json
+
+# Build artifacts
+**/tsconfig.tsbuildinfo
+**/target/
+
+# Rust projects (committed as separate repos)
+gather-claw/zeroclaw-gather-channel/
+
+# Gather agent identity (secrets)
+**/.gather/keys/
+gather-claw/.gather/
+
+# Blog drafts
+BLOG*.html
+BLOG*.md
