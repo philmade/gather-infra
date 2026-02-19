@@ -1,0 +1,287 @@
+/**
+ * Landing Page — Hero, features, pricing
+ */
+
+/* ===== Layout ===== */
+
+.landing {
+  min-height: 100vh;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow-x: hidden;
+}
+
+.landing-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: var(--space-lg) var(--space-xl);
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.landing-nav-logo {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  font-weight: 600;
+  font-size: 1.2rem;
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.landing-nav-logo img {
+  width: 32px;
+  height: 32px;
+}
+
+.landing-nav-actions {
+  display: flex;
+  gap: var(--space-sm);
+}
+
+/* ===== Hero ===== */
+
+.landing-hero {
+  text-align: center;
+  padding: 6rem var(--space-xl) 4rem;
+  max-width: 720px;
+  margin: 0 auto;
+}
+
+.landing-hero h1 {
+  font-family: var(--font-heading);
+  font-size: 3rem;
+  font-weight: 700;
+  line-height: 1.15;
+  margin: 0 0 var(--space-lg);
+  letter-spacing: -0.02em;
+}
+
+.landing-hero h1 .accent {
+  color: var(--accent);
+}
+
+.landing-hero .subline {
+  font-size: 1.15rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0 0 var(--space-2xl);
+  max-width: 520px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.landing-hero-ctas {
+  display: flex;
+  gap: var(--space-md);
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+/* ===== Features ===== */
+
+.landing-features {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: var(--space-3xl) var(--space-xl);
+}
+
+.landing-features h2 {
+  font-family: var(--font-heading);
+  font-size: 1.5rem;
+  font-weight: 600;
+  text-align: center;
+  margin: 0 0 var(--space-2xl);
+  color: var(--text-primary);
+}
+
+.landing-feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-lg);
+}
+
+.landing-feature-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-xl);
+  transition: border-color 0.2s;
+}
+
+.landing-feature-card:hover {
+  border-color: var(--accent);
+}
+
+.landing-feature-icon {
+  font-size: 1.75rem;
+  margin-bottom: var(--space-md);
+}
+
+.landing-feature-card h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin: 0 0 var(--space-sm);
+  color: var(--text-primary);
+}
+
+.landing-feature-card p {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  margin: 0;
+}
+
+/* ===== Pricing ===== */
+
+.landing-pricing {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: var(--space-3xl) var(--space-xl);
+}
+
+.landing-pricing h2 {
+  font-family: var(--font-heading);
+  font-size: 1.5rem;
+  font-weight: 600;
+  text-align: center;
+  margin: 0 0 var(--space-sm);
+  color: var(--text-primary);
+}
+
+.landing-pricing .pricing-sub {
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  margin: 0 0 var(--space-2xl);
+}
+
+.landing-pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-lg);
+}
+
+.pricing-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: var(--space-xl);
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.2s, transform 0.2s;
+}
+
+.pricing-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.pricing-card.featured {
+  border-color: var(--accent);
+  box-shadow: 0 0 30px rgba(168, 85, 247, 0.15);
+}
+
+.pricing-card .tier-name {
+  font-size: 0.8rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  margin: 0 0 var(--space-sm);
+}
+
+.pricing-card .tier-price {
+  font-family: var(--font-heading);
+  font-size: 2.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  line-height: 1.2;
+}
+
+.pricing-card .tier-price span {
+  font-size: 0.9rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.pricing-card .tier-desc {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: var(--space-sm) 0 var(--space-lg);
+  line-height: 1.5;
+}
+
+.pricing-card ul {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 var(--space-xl);
+  flex: 1;
+}
+
+.pricing-card ul li {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  padding: 0.375rem 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.pricing-card ul li::before {
+  content: '\2713';
+  color: var(--green);
+  font-weight: 600;
+  font-size: 0.8rem;
+}
+
+/* ===== Footer ===== */
+
+.landing-footer {
+  text-align: center;
+  padding: var(--space-2xl) var(--space-xl);
+  border-top: 1px solid var(--border);
+  max-width: 900px;
+  margin: var(--space-2xl) auto 0;
+}
+
+.landing-footer p {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  margin: 0;
+}
+
+/* ===== Responsive ===== */
+
+@media (max-width: 768px) {
+  .landing-hero {
+    padding: 4rem var(--space-lg) 2rem;
+  }
+
+  .landing-hero h1 {
+    font-size: 2rem;
+  }
+
+  .landing-feature-grid,
+  .landing-pricing-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-features,
+  .landing-pricing {
+    padding: var(--space-2xl) var(--space-lg);
+  }
+}
+
+@media (max-width: 480px) {
+  .landing-hero h1 {
+    font-size: 1.75rem;
+  }
+
+  .landing-hero-ctas {
+    flex-direction: column;
+    align-items: center;
+  }
+}

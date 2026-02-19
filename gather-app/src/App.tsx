@@ -11,7 +11,8 @@ import DeployAgentModal from './components/DeployModal/DeployAgentModal'
 import SettingsView from './components/Settings/SettingsView'
 import WorkspaceOnboarding from './components/Onboarding/WorkspaceOnboarding'
 import { useWorkspace } from './context/WorkspaceContext'
-import { useEffect, useState } from 'react'
+import { listClaws } from './lib/api'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
 function ChatGate({ children }: { children: ReactNode }) {
@@ -65,8 +66,22 @@ function StripeToast({ message, onDismiss }: { message: string; onDismiss: () =>
 }
 
 function WorkspaceLayout() {
-  const { state } = useWorkspace()
+  const { state, dispatch } = useWorkspace()
   const [stripeToast, setStripeToast] = useState<string | null>(null)
+  const checkedClaws = useRef(false)
+
+  // Auto-open deploy modal for new users with zero claws
+  useEffect(() => {
+    if (checkedClaws.current) return
+    checkedClaws.current = true
+    listClaws()
+      .then(data => {
+        if (!data.claws || data.claws.length === 0) {
+          dispatch({ type: 'OPEN_DEPLOY' })
+        }
+      })
+      .catch(() => {})
+  }, [dispatch])
 
   // Handle Stripe redirect return
   useEffect(() => {

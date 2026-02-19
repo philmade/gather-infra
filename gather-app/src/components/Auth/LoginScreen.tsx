@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
 
-export default function LoginScreen() {
+export default function LoginScreen({ onBack }: { onBack?: () => void } = {}) {
   const { state, signInWithEmail, signUpWithEmail, signInWithGoogle, clearError } = useAuth()
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
@@ -110,6 +110,14 @@ export default function LoginScreen() {
             {mode === 'signin' ? 'Sign Up' : 'Sign In'}
           </button>
         </p>
+
+        {onBack && (
+          <p className="login-toggle" style={{ marginTop: 0 }}>
+            <button type="button" onClick={onBack}>
+              &larr; Back to home
+            </button>
+          </p>
+        )}
       </div>
     </div>
   )
