@@ -24,7 +24,6 @@ services:
     ports:
       - "80:80"
       - "443:443"
-      - "127.0.0.1:8080:8080"   # Traefik dashboard (local dev only)
     environment:
       CF_DNS_API_TOKEN: ${CF_DNS_API_TOKEN}
     volumes:
