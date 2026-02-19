@@ -52,7 +52,7 @@ func (m *MemoryTool) Recall(days int) ([]string, error) {
 		`SELECT content FROM memories
 		 WHERE created_at > datetime('now', ?)
 		 ORDER BY importance DESC, created_at DESC
-		 LIMIT 20`,
+		 LIMIT 100`,
 		fmt.Sprintf("-%d days", days),
 	)
 	if err != nil {
@@ -78,7 +78,7 @@ func (m *MemoryTool) Search(query string) ([]string, error) {
 		`SELECT content FROM memories
 		 WHERE content LIKE ?
 		 ORDER BY importance DESC, created_at DESC
-		 LIMIT 10`,
+		 LIMIT 50`,
 		"%"+query+"%",
 	)
 	if err != nil {
