@@ -26,6 +26,9 @@ COPY --from=builder /build/clawpoint-medic /app/
 COPY --from=builder /build/clawpoint-bridge /app/
 COPY --from=builder /build/clawpoint-proxy /app/
 
+# Core version (readable by the agent at runtime)
+COPY clawpoint-go/core/VERSION /app/core-version
+
 # Entrypoint (gather identity + service startup)
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
@@ -36,7 +39,7 @@ ENV CLAWPOINT_DB=/app/data/messages.db
 # Default public page template (copied to /app/public on first boot)
 COPY public/ /app/public-default/
 
-RUN mkdir -p /app/data /app/soul /app/public /var/log
+RUN mkdir -p /app/data /app/soul /app/public /app/builds /app/data/build-failures /var/log
 
 EXPOSE 8080
 

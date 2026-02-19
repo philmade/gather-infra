@@ -1,7 +1,14 @@
-// clawpoint-medic — process supervisor that auto-recovers crashed agents.
+// clawpoint-medic — process supervisor with hot-swap and rollback.
 //
-// Tails agent log files, detects death signatures, confirms via health check,
-// diagnoses via Claude Code CLI, restarts the agent, and verifies recovery.
+// Watches agent logs for crash signatures, performs health checks, and
+// manages binary hot-swaps from the external build service.
+//
+// Hot-swap flow:
+//   1. Build service writes new binary to /app/builds/clawpoint-go.new
+//   2. Medic detects the file, backs up current binary to .prev
+//   3. Medic replaces current binary and restarts the agent
+//   4. If new binary crashes within 30s: revert to .prev, log failure
+//   5. Agent reads failure logs on next startup to learn what went wrong
 //
 // Build: cd clawpoint-go && go build -o clawpoint-medic ./cmd/medic
 // Usage: ./clawpoint-medic
@@ -11,13 +18,13 @@ package main
 import (
 	"bufio"
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -62,11 +69,9 @@ var agents = map[string]agentConfig{
 
 // Death signatures — any match in a log line triggers investigation.
 var deathSignatures = []string{
-	// Go
 	`panic:`,
 	`fatal error:`,
 	`server failed:`,
-	// General
 	`FATAL`,
 	`Segmentation fault`,
 }
@@ -74,14 +79,23 @@ var deathSignatures = []string{
 var deathPatterns []*regexp.Regexp
 
 const (
-	cooldownSeconds      = 90
-	healthCheckInterval  = 60 * time.Second
-	maxFixAttempts       = 3
-	claudeTimeout        = 180 * time.Second
-	healthTimeout        = 5 * time.Second
-	logContextLines      = 80
-	startupWait          = 8 * time.Second
-	initialHealthDelay   = 30 * time.Second
+	cooldownSeconds     = 90
+	healthCheckInterval = 60 * time.Second
+	maxRestartAttempts  = 3
+	healthTimeout       = 5 * time.Second
+	logContextLines     = 80
+	startupWait         = 8 * time.Second
+	initialHealthDelay  = 30 * time.Second
+	hotSwapCheckInterval = 5 * time.Second
+	hotSwapStabilityWait = 30 * time.Second
+)
+
+// Hot-swap paths
+var (
+	binaryPath    = projectRoot() + "/clawpoint-go"
+	newBinaryPath = projectRoot() + "/builds/clawpoint-go.new"
+	prevBinaryPath = projectRoot() + "/clawpoint-go.prev"
+	failureLogDir  = projectRoot() + "/data/build-failures"
 )
 
 func init() {
@@ -92,12 +106,9 @@ func init() {
 }
 
 func projectRoot() string {
-	// Use CLAWPOINT_ROOT env var if set (for container deployment)
 	if root := os.Getenv("CLAWPOINT_ROOT"); root != "" {
 		return root
 	}
-	// Medic binary lives in clawpoint-go/cmd/medic, project root is two up from there.
-	// But we resolve from the working directory since the binary is invoked from project root.
 	home, _ := os.UserHomeDir()
 	return home + "/gather-claw"
 }
@@ -135,7 +146,7 @@ func detectCrash(line string) bool {
 
 func checkHealth(cfg agentConfig) bool {
 	if cfg.HealthURL == "" {
-		return false // No health endpoint — can't verify
+		return false
 	}
 	client := &http.Client{Timeout: healthTimeout}
 	resp, err := client.Get(cfg.HealthURL)
@@ -147,7 +158,7 @@ func checkHealth(cfg agentConfig) bool {
 }
 
 // ---------------------------------------------------------------------------
-// Diagnosis & Fix
+// Error capture (replaces Claude Code diagnosis)
 // ---------------------------------------------------------------------------
 
 func captureContext(logFile string) string {
@@ -157,7 +168,6 @@ func captureContext(logFile string) string {
 	}
 	defer f.Close()
 
-	// Read all lines, keep last N
 	var lines []string
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024)
@@ -170,70 +180,6 @@ func captureContext(logFile string) string {
 		start = len(lines) - logContextLines
 	}
 	return strings.Join(lines[start:], "\n")
-}
-
-func diagnoseAndFix(ctx context.Context, agentName string, cfg agentConfig, errorContext string) string {
-	// Truncate context to last 4000 chars
-	if len(errorContext) > 4000 {
-		errorContext = errorContext[len(errorContext)-4000:]
-	}
-
-	task := fmt.Sprintf(
-		"The agent '%s' has crashed. Here is the error from the logs:\n\n"+
-			"```\n%s\n```\n\n"+
-			"The agent code is in %s.\n"+
-			"Diagnose the error and make the minimum surgical fix to resolve the crash. "+
-			"Do NOT refactor, improve, or add features — just fix the crash. "+
-			"Report exactly what you changed.",
-		agentName, errorContext, cfg.WorkingDir,
-	)
-
-	// Filter out CLAUDECODE env var to avoid recursion
-	env := make([]string, 0, len(os.Environ()))
-	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "CLAUDECODE=") {
-			env = append(env, e)
-		}
-	}
-
-	claudeCtx, cancel := context.WithTimeout(ctx, claudeTimeout)
-	defer cancel()
-
-	cmd := exec.CommandContext(claudeCtx, "claude", "-p",
-		"--dangerously-skip-permissions",
-		"--output-format", "json",
-		task,
-	)
-	cmd.Dir = cfg.WorkingDir
-	cmd.Env = env
-
-	out, err := cmd.CombinedOutput()
-	if claudeCtx.Err() == context.DeadlineExceeded {
-		return "Claude Code timed out after 180s"
-	}
-	if err != nil && len(out) == 0 {
-		return fmt.Sprintf("Claude Code failed: %v", err)
-	}
-
-	// Try to parse JSON output
-	var parsed map[string]any
-	if jsonErr := json.Unmarshal(out, &parsed); jsonErr == nil {
-		if r, ok := parsed["result"].(string); ok {
-			if len(r) > 3000 {
-				return r[:3000]
-			}
-			return r
-		}
-	}
-
-	result := string(out)
-	if len(result) > 3000 {
-		return result[:3000]
-	}
-	if result == "" {
-		return "(no output)"
-	}
-	return result
 }
 
 // ---------------------------------------------------------------------------
@@ -251,11 +197,10 @@ func killAgent(cfg agentConfig) {
 			exec.Command("kill", pid).Run()
 		}
 	}
-	time.Sleep(2 * time.Second) // Wait for graceful shutdown
+	time.Sleep(2 * time.Second)
 }
 
 func startAgent(agentName string, cfg agentConfig) bool {
-	// Append restart marker
 	if f, err := os.OpenFile(cfg.LogFile, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644); err == nil {
 		fmt.Fprintf(f, "\n--- MEDIC RESTART at %s ---\n", time.Now().Format(time.RFC3339))
 		f.Close()
@@ -263,20 +208,18 @@ func startAgent(agentName string, cfg agentConfig) bool {
 
 	cmd := exec.Command("bash", "-c", cfg.RestartCmd)
 	cmd.Dir = cfg.WorkingDir
-	// Detach: start in new session
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 
 	if err := cmd.Start(); err != nil {
 		logMsg("Failed to start %s: %v", agentName, err)
 		return false
 	}
-	// Release — don't wait for it
 	cmd.Process.Release()
 	return true
 }
 
 // ---------------------------------------------------------------------------
-// Crash Handler
+// Crash Handler (simplified — no Claude Code, just restart)
 // ---------------------------------------------------------------------------
 
 func handleCrash(ctx context.Context, agentName string, cfg agentConfig, trigger string) {
@@ -284,7 +227,7 @@ func handleCrash(ctx context.Context, agentName string, cfg agentConfig, trigger
 	lastActionMu.Lock()
 	if last, ok := lastAction[agentName]; ok && now.Sub(last).Seconds() < cooldownSeconds {
 		lastActionMu.Unlock()
-		return // Cooldown active
+		return
 	}
 	lastAction[agentName] = now
 	lastActionMu.Unlock()
@@ -296,56 +239,172 @@ func handleCrash(ctx context.Context, agentName string, cfg agentConfig, trigger
 	}
 	logMsg("Trigger: %s", strings.TrimSpace(trimmed))
 
-	// 1. Confirm dead (avoid false positives from error logging)
+	// Confirm dead
 	if cfg.HealthURL != "" && checkHealth(cfg) {
 		logMsg("False alarm — %s is still responding", agentName)
 		return
 	}
 
 	logMsg("Confirmed dead. Capturing error context...")
-
-	// 2. Capture error context
 	errContext := captureContext(cfg.LogFile)
 
-	// 3. Diagnose and fix (up to maxFixAttempts)
-	for attempt := 1; attempt <= maxFixAttempts; attempt++ {
-		logMsg("Fix attempt %d/%d...", attempt, maxFixAttempts)
+	// Log the crash for the agent to learn from on next startup
+	writeFailureLog(agentName, "crash", errContext)
 
-		report := diagnoseAndFix(ctx, agentName, cfg, errContext)
-		if len(report) > 300 {
-			logMsg("Fix report: %s", report[:300])
-		} else {
-			logMsg("Fix report: %s", report)
-		}
+	// Simple restart (up to maxRestartAttempts)
+	for attempt := 1; attempt <= maxRestartAttempts; attempt++ {
+		logMsg("Restart attempt %d/%d for %s...", attempt, maxRestartAttempts, agentName)
 
-		// 4. Restart
-		logMsg("Restarting %s...", agentName)
 		killAgent(cfg)
 		if !startAgent(agentName, cfg) {
-			logMsg("Failed to restart %s", agentName)
+			logMsg("Failed to start %s", agentName)
 			continue
 		}
 
-		// 5. Wait for startup
 		time.Sleep(startupWait)
 
-		// 6. Verify
 		if cfg.HealthURL != "" && checkHealth(cfg) {
 			logMsg("SUCCESS: %s is back up (attempt %d)", agentName, attempt)
 			return
 		}
-		// For agents without health URL, assume success if start didn't fail
 		if cfg.HealthURL == "" {
 			logMsg("SUCCESS: %s restarted (no health endpoint to verify)", agentName)
 			return
 		}
 
 		logMsg("Still dead after attempt %d", attempt)
-		// Re-capture context for next attempt
-		errContext = captureContext(cfg.LogFile)
 	}
 
-	logMsg("FAILED: Could not recover %s after %d attempts", agentName, maxFixAttempts)
+	logMsg("FAILED: Could not recover %s after %d attempts", agentName, maxRestartAttempts)
+}
+
+// ---------------------------------------------------------------------------
+// Hot-swap: watch for new binary from build service
+// ---------------------------------------------------------------------------
+
+func watchForNewBinary(ctx context.Context) {
+	logMsg("Hot-swap watcher started (checking %s)", newBinaryPath)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(hotSwapCheckInterval):
+		}
+
+		// Check if new binary exists
+		info, err := os.Stat(newBinaryPath)
+		if err != nil || info.Size() == 0 {
+			continue
+		}
+
+		logMsg("New binary detected: %s (%d bytes)", newBinaryPath, info.Size())
+		performHotSwap(ctx)
+	}
+}
+
+func performHotSwap(ctx context.Context) {
+	cfg := agents["clawpoint-go"]
+
+	// 1. Backup current binary
+	logMsg("Backing up current binary to %s", prevBinaryPath)
+	if err := copyFile(binaryPath, prevBinaryPath); err != nil {
+		logMsg("Failed to backup binary: %v", err)
+		os.Remove(newBinaryPath)
+		return
+	}
+
+	// 2. Stop current agent
+	logMsg("Stopping current clawpoint-go...")
+	killAgent(cfg)
+
+	// 3. Replace binary
+	logMsg("Replacing binary with new version...")
+	if err := copyFile(newBinaryPath, binaryPath); err != nil {
+		logMsg("Failed to replace binary: %v — reverting", err)
+		copyFile(prevBinaryPath, binaryPath)
+		os.Remove(newBinaryPath)
+		startAgent("clawpoint-go", cfg)
+		return
+	}
+	os.Chmod(binaryPath, 0755)
+	os.Remove(newBinaryPath)
+
+	// 4. Start new binary
+	logMsg("Starting new binary...")
+	if !startAgent("clawpoint-go", cfg) {
+		logMsg("Failed to start new binary — reverting")
+		copyFile(prevBinaryPath, binaryPath)
+		startAgent("clawpoint-go", cfg)
+		writeFailureLog("clawpoint-go", "hot-swap", "Failed to start new binary")
+		return
+	}
+
+	// 5. Wait for stability period
+	logMsg("Watching for stability (%v)...", hotSwapStabilityWait)
+	stableUntil := time.Now().Add(hotSwapStabilityWait)
+
+	for time.Now().Before(stableUntil) {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+		}
+
+		if cfg.HealthURL != "" && !checkHealth(cfg) {
+			// Might just be starting up — give it more time if within first 10s
+			if time.Until(stableUntil) > 20*time.Second {
+				continue
+			}
+
+			logMsg("New binary appears dead during stability check — reverting")
+			errContext := captureContext(cfg.LogFile)
+			writeFailureLog("clawpoint-go", "hot-swap-crash", errContext)
+
+			killAgent(cfg)
+			logMsg("Restoring previous binary...")
+			copyFile(prevBinaryPath, binaryPath)
+			os.Chmod(binaryPath, 0755)
+			startAgent("clawpoint-go", cfg)
+			logMsg("Reverted to previous binary")
+			return
+		}
+	}
+
+	logMsg("Hot-swap SUCCESS: new binary is stable")
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, in)
+	if err != nil {
+		return err
+	}
+
+	return out.Close()
+}
+
+func writeFailureLog(agentName, category, content string) {
+	os.MkdirAll(failureLogDir, 0755)
+	ts := time.Now().Format("2006-01-02T15-04-05")
+	filename := filepath.Join(failureLogDir, fmt.Sprintf("%s_%s_%s.log", ts, agentName, category))
+
+	header := fmt.Sprintf("Agent: %s\nCategory: %s\nTime: %s\n---\n\n",
+		agentName, category, time.Now().Format(time.RFC3339))
+
+	os.WriteFile(filename, []byte(header+content), 0644)
+	logMsg("Failure log written: %s", filename)
 }
 
 // ---------------------------------------------------------------------------
@@ -353,7 +412,6 @@ func handleCrash(ctx context.Context, agentName string, cfg agentConfig, trigger
 // ---------------------------------------------------------------------------
 
 func watchLogs(ctx context.Context, agentName string, cfg agentConfig) {
-	// Touch the log file so tail doesn't fail
 	if f, err := os.OpenFile(cfg.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); err == nil {
 		f.Close()
 	}
@@ -387,7 +445,6 @@ func watchLogs(ctx context.Context, agentName string, cfg agentConfig) {
 			}
 		}
 
-		// If we get here, tail exited — wait and retry
 		cmd.Wait()
 		if ctx.Err() != nil {
 			return
@@ -398,7 +455,6 @@ func watchLogs(ctx context.Context, agentName string, cfg agentConfig) {
 }
 
 func periodicHealthCheck(ctx context.Context) {
-	// Initial delay — let agents finish starting
 	select {
 	case <-time.After(initialHealthDelay):
 	case <-ctx.Done():
@@ -415,10 +471,9 @@ func periodicHealthCheck(ctx context.Context) {
 		case <-ticker.C:
 			for name, cfg := range agents {
 				if cfg.HealthURL == "" {
-					continue // No health endpoint
+					continue
 				}
 				if !checkHealth(cfg) {
-					// Only act if not in cooldown
 					lastActionMu.Lock()
 					inCooldown := time.Since(lastAction[name]).Seconds() < cooldownSeconds
 					lastActionMu.Unlock()
@@ -449,7 +504,6 @@ func printStatus() {
 				status = "DOWN"
 			}
 		} else {
-			// Check by process pattern
 			if err := exec.Command("pgrep", "-f", cfg.ProcessPattern).Run(); err == nil {
 				status = "running (no health URL)"
 			} else {
@@ -476,6 +530,9 @@ func main() {
 	logMsg("Death signatures: %d", len(deathSignatures))
 	logMsg("Cooldown: %ds | Health check every: %v", cooldownSeconds, healthCheckInterval)
 
+	// Ensure failure log dir exists
+	os.MkdirAll(failureLogDir, 0755)
+
 	// Start log watcher goroutines
 	for name, cfg := range agents {
 		go watchLogs(ctx, name, cfg)
@@ -486,12 +543,16 @@ func main() {
 	go periodicHealthCheck(ctx)
 	logMsg("Periodic health checker started")
 
+	// Start hot-swap watcher
+	go watchForNewBinary(ctx)
+	logMsg("Hot-swap watcher started")
+
 	// Quick status report
 	printStatus()
 
 	logMsg("Medic is ready.")
 
-	// Wait for signal, then read from stdout for status reporting
+	// Stdin commands
 	go func() {
 		reader := bufio.NewReader(os.Stdin)
 		for {
@@ -511,7 +572,6 @@ func main() {
 	<-sigChan
 	logMsg("Shutting down...")
 	cancel()
-	// Give goroutines a moment to clean up
 	time.Sleep(500 * time.Millisecond)
 }
 

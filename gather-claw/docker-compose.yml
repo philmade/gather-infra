@@ -12,11 +12,32 @@ services:
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - CLAWPOINT_ROOT=/app
       - CLAWPOINT_DB=/app/data/messages.db
+      - BUILD_SERVICE_URL=http://build-service:9090
     volumes:
       - ./dev-data:/app/data
       - ./dev-soul:/app/soul
+      - claw_builds:/app/builds
     ports:
-      - "8080:8080"
+      - "8180:8080"
     mem_limit: 512m
     cpus: 1
     restart: unless-stopped
+    depends_on:
+      - build-service
+
+  build-service:
+    build:
+      context: .
+      dockerfile: Dockerfile.buildservice
+    container_name: claw-build-service
+    volumes:
+      - ./clawpoint-go:/src
+      - claw_builds:/builds
+    ports:
+      - "127.0.0.1:9090:9090"
+    mem_limit: 1g
+    cpus: 1
+    restart: unless-stopped
+
+volumes:
+  claw_builds:

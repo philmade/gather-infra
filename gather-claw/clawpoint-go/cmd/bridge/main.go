@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"clawpoint-go/connectors"
+	"clawpoint-go/core/connectors"
 )
 
 func main() {

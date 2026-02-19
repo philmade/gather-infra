@@ -49,9 +49,9 @@ func (m *MemoryTool) Store(content, memType, tags string) error {
 // Recall retrieves recent memories
 func (m *MemoryTool) Recall(days int) ([]string, error) {
 	rows, err := m.db.Query(
-		`SELECT content FROM memories 
-		 WHERE created_at > datetime('now', ?) 
-		 ORDER BY importance DESC, created_at DESC 
+		`SELECT content FROM memories
+		 WHERE created_at > datetime('now', ?)
+		 ORDER BY importance DESC, created_at DESC
 		 LIMIT 20`,
 		fmt.Sprintf("-%d days", days),
 	)
@@ -75,9 +75,9 @@ func (m *MemoryTool) Recall(days int) ([]string, error) {
 // Search finds memories by keyword
 func (m *MemoryTool) Search(query string) ([]string, error) {
 	rows, err := m.db.Query(
-		`SELECT content FROM memories 
-		 WHERE content LIKE ? 
-		 ORDER BY importance DESC, created_at DESC 
+		`SELECT content FROM memories
+		 WHERE content LIKE ?
+		 ORDER BY importance DESC, created_at DESC
 		 LIMIT 10`,
 		"%"+query+"%",
 	)

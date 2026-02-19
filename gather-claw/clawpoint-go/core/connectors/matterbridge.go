@@ -16,15 +16,15 @@ import (
 
 // MatterbridgeConnector handles bidirectional messaging via Matterbridge + ADK API.
 type MatterbridgeConnector struct {
-	mbURL        string // Matterbridge API
-	adkURL       string // ADK API
-	appName      string
-	gateway      string
-	botName      string
+	mbURL         string // Matterbridge API
+	adkURL        string // ADK API
+	appName       string
+	gateway       string
+	botName       string
 	telegramToken string // For typing indicators
-	httpClient   *http.Client
-	sessions     map[string]string // userID → sessionID
-	mu           sync.Mutex
+	httpClient    *http.Client
+	sessions      map[string]string // userID -> sessionID
+	mu            sync.Mutex
 }
 
 // MBMessage represents a Matterbridge message.
@@ -121,13 +121,11 @@ func (m *MatterbridgeConnector) readStream(ctx context.Context, msgChan chan<- M
 				continue
 			}
 
-			// Skip connection events
 			if msg.Event == "api_connected" {
 				fmt.Println("connected to Matterbridge stream")
 				continue
 			}
 
-			// Skip our own messages
 			if msg.Username == m.botName {
 				continue
 			}
@@ -162,7 +160,6 @@ func (m *MatterbridgeConnector) sendTypingIndicator(chatID string) {
 }
 
 // startTypingLoop sends typing indicators every 4s until the context is cancelled.
-// Returns a cancel func — call it when the response is ready.
 func (m *MatterbridgeConnector) startTypingLoop(chatID string) context.CancelFunc {
 	ctx, cancel := context.WithCancel(context.Background())
 	go func() {
@@ -193,11 +190,9 @@ func (m *MatterbridgeConnector) routeToADK(ctx context.Context, msg MBMessage) (
 		return "", fmt.Errorf("session: %w", err)
 	}
 
-	// Show typing indicator while agent is thinking
 	stopTyping := m.startTypingLoop(msg.Channel)
 	defer stopTyping()
 
-	// Format the message with source context
 	proto := msg.Protocol
 	if proto == "" {
 		proto = "chat"
@@ -216,7 +211,6 @@ func (m *MatterbridgeConnector) getOrCreateSession(userID string) (string, error
 	}
 	m.mu.Unlock()
 
-	// Create new session via ADK API
 	url := fmt.Sprintf("%s/api/apps/%s/users/%s/sessions", m.adkURL, m.appName, userID)
 	resp, err := m.httpClient.Post(url, "application/json", strings.NewReader("{}"))
 	if err != nil {
@@ -270,7 +264,6 @@ func (m *MatterbridgeConnector) sendRunSSE(ctx context.Context, userID, sessionI
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 
-	// Use a longer timeout for SSE (LLM can take a while)
 	client := &http.Client{Timeout: 300 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
@@ -283,7 +276,6 @@ func (m *MatterbridgeConnector) sendRunSSE(ctx context.Context, userID, sessionI
 		return "", fmt.Errorf("run_sse HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	// Parse SSE events to extract the agent's final response
 	return m.parseSSEResponse(resp.Body)
 }
 
@@ -291,17 +283,14 @@ func (m *MatterbridgeConnector) sendRunSSE(ctx context.Context, userID, sessionI
 func (m *MatterbridgeConnector) parseSSEResponse(r io.Reader) (string, error) {
 	scanner := bufio.NewScanner(r)
 	var lastText string
-	var lastAuthor string
 
 	for scanner.Scan() {
 		line := scanner.Text()
 
-		// Handle plain-text error lines from ADK
 		if strings.HasPrefix(line, "Error while running agent:") {
 			return "", fmt.Errorf("%s", line)
 		}
 
-		// SSE format: "data: {json}"
 		if !strings.HasPrefix(line, "data: ") {
 			continue
 		}
@@ -312,12 +301,6 @@ func (m *MatterbridgeConnector) parseSSEResponse(r io.Reader) (string, error) {
 			continue
 		}
 
-		// Track the author (which agent produced this event)
-		if author, ok := event["author"].(string); ok {
-			lastAuthor = author
-		}
-
-		// Look for content events with text parts
 		content, ok := event["content"].(map[string]any)
 		if !ok {
 			continue
@@ -334,10 +317,7 @@ func (m *MatterbridgeConnector) parseSSEResponse(r io.Reader) (string, error) {
 				continue
 			}
 			if text, ok := part["text"].(string); ok && text != "" {
-				// Only capture text from the root agent's final response
-				// (sub-agent outputs are intermediate)
 				lastText = text
-				_ = lastAuthor
 			}
 		}
 	}

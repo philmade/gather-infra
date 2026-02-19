@@ -1,0 +1,32 @@
+# ClawPoint Build Service — compiles claw agent source externally.
+#
+# This runs the Go toolchain so claws don't need it in their runtime image.
+# The claw source is mounted read-only; built binaries go to a shared volume.
+
+FROM golang:1.24-alpine
+
+RUN apk add --no-cache git
+
+WORKDIR /build-service
+
+# Copy only the build service source + go.mod for dependency caching
+COPY clawpoint-go/go.mod clawpoint-go/go.sum /build-service/
+RUN go mod download
+
+# Copy full source (build service needs the module context)
+COPY clawpoint-go/ /build-service/
+
+# Build the service binary
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /usr/local/bin/clawpoint-buildservice ./cmd/buildservice
+
+# The source directory will be mounted at /src (read-write for agent modifications)
+# The output directory will be mounted at /builds (shared with claw container)
+RUN mkdir -p /src /builds
+
+ENV BUILD_SRC=/src
+ENV BUILD_OUT=/builds
+ENV BUILD_ADDR=:9090
+
+EXPOSE 9090
+
+CMD ["clawpoint-buildservice"]

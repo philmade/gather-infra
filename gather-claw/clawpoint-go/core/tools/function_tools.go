@@ -100,12 +100,20 @@ type ClaudeCodeArgs struct {
 }
 type ClaudeCodeResult struct{ Output string `json:"output"` }
 
-type SelfBuildArgs struct {
-	Reason string `json:"reason,omitempty" jsonschema:"Reason for self-build"`
+type BuildRequestArgs struct {
+	Reason string `json:"reason,omitempty" jsonschema:"Reason for build request"`
 }
-type SelfBuildResult struct {
+type BuildRequestResult struct {
 	Message string `json:"message"`
 	Output  string `json:"output,omitempty"`
+}
+
+// Truncate is a shared utility for truncating strings.
+func Truncate(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "..."
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +134,7 @@ func NewMemoryTools(mem *MemoryTool) ([]tool.Tool, error) {
 			if err := mem.Store(args.Content, memType, args.Tags); err != nil {
 				return MemoryStoreResult{}, err
 			}
-			return MemoryStoreResult{Message: fmt.Sprintf("Stored: %s", truncate(args.Content, 50))}, nil
+			return MemoryStoreResult{Message: fmt.Sprintf("Stored: %s", Truncate(args.Content, 50))}, nil
 		},
 	)
 	if err != nil {
@@ -365,32 +373,6 @@ func NewClaudeTools() ([]tool.Tool, error) {
 				return ClaudeCodeResult{}, err
 			}
 			return ClaudeCodeResult{Output: output}, nil
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, t)
-
-	return out, nil
-}
-
-// NewSelfBuildTools creates self-modification tools (direct on root agent).
-func NewSelfBuildTools() ([]tool.Tool, error) {
-	sb := NewSelfBuildTool()
-	var out []tool.Tool
-
-	t, err := functiontool.New(
-		functiontool.Config{Name: "self_build", Description: "Compile yourself and restart with the new binary"},
-		func(ctx tool.Context, args SelfBuildArgs) (SelfBuildResult, error) {
-			output, buildErr := sb.Build()
-			if buildErr != nil {
-				return SelfBuildResult{Message: "Build failed", Output: output}, buildErr
-			}
-			if err := sb.Reboot(); err != nil {
-				return SelfBuildResult{}, err
-			}
-			return SelfBuildResult{Message: "Build succeeded, rebooting...", Output: output}, nil
 		},
 	)
 	if err != nil {
