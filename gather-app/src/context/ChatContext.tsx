@@ -14,6 +14,7 @@ interface ChatState {
   clawTopic: string | null      // "claw:{id}" when viewing a claw channel
   clawName: string | null       // display name of the active claw
   clawMessages: ChatMessage[]   // messages from claw REST API
+  clawTyping: boolean           // true while waiting for claw LLM response
   error: string | null
 }
 
@@ -26,6 +27,7 @@ type ChatAction =
   | { type: 'ADD_MESSAGE'; message: ChatMessage }
   | { type: 'SET_CLAW_TOPIC'; clawId: string; clawName: string; messages: ChatMessage[] }
   | { type: 'ADD_CLAW_MESSAGE'; message: ChatMessage }
+  | { type: 'SET_CLAW_TYPING'; typing: boolean }
   | { type: 'CLEAR_CLAW' }
   | { type: 'SET_ERROR'; error: string }
   | { type: 'RESET' }
@@ -47,12 +49,14 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       if (state.messages.some(m => m.seq === action.message.seq)) return state
       return { ...state, messages: [...state.messages, action.message] }
     case 'SET_CLAW_TOPIC':
-      return { ...state, clawTopic: `claw:${action.clawId}`, clawName: action.clawName, clawMessages: action.messages, activeTopic: null }
+      return { ...state, clawTopic: `claw:${action.clawId}`, clawName: action.clawName, clawMessages: action.messages, clawTyping: false, activeTopic: null }
     case 'ADD_CLAW_MESSAGE':
       if (state.clawMessages.some(m => m.seq === action.message.seq)) return state
       return { ...state, clawMessages: [...state.clawMessages, action.message] }
+    case 'SET_CLAW_TYPING':
+      return { ...state, clawTyping: action.typing }
     case 'CLEAR_CLAW':
-      return { ...state, clawTopic: null, clawName: null, clawMessages: [] }
+      return { ...state, clawTopic: null, clawName: null, clawMessages: [], clawTyping: false }
     case 'SET_ERROR':
       return { ...state, error: action.error }
     case 'RESET':
@@ -70,6 +74,7 @@ const initialState: ChatState = {
   clawTopic: null,
   clawName: null,
   clawMessages: [],
+  clawTyping: false,
   error: null,
 }
 
@@ -272,21 +277,35 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const sendMessage = useCallback(async (text: string) => {
     // Route to claw REST if a claw topic is active
     if (clawIdRef.current && state.clawTopic) {
+      // Show user's message immediately (optimistic)
+      const userMsg: ChatMessage = {
+        seq: Date.now(),
+        from: 'You',
+        content: text,
+        ts: new Date().toISOString(),
+        isOwn: true,
+        topic: state.clawTopic,
+      }
+      dispatch({ type: 'ADD_CLAW_MESSAGE', message: userMsg })
+      dispatch({ type: 'SET_CLAW_TYPING', typing: true })
+
       try {
         const data = await apiSendClawMessage(clawIdRef.current, text)
-        // Mark as seen so the poll doesn't duplicate it
+        // Mark both user message and claw reply as seen so poll doesn't duplicate
         clawSeenIdsRef.current.add(data.message.id)
-        const msg: ChatMessage = {
-          seq: Date.now(),
+        const clawReply: ChatMessage = {
+          seq: Date.now() + 1,
           from: data.message.author_name,
           content: data.message.body,
           ts: data.message.created,
-          isOwn: true,
+          isOwn: false,
           topic: state.clawTopic,
         }
-        dispatch({ type: 'ADD_CLAW_MESSAGE', message: msg })
+        dispatch({ type: 'SET_CLAW_TYPING', typing: false })
+        dispatch({ type: 'ADD_CLAW_MESSAGE', message: clawReply })
       } catch (err) {
         console.warn('[Chat] Failed to send claw message:', err)
+        dispatch({ type: 'SET_CLAW_TYPING', typing: false })
       }
       return
     }

@@ -15,8 +15,7 @@ export default function MessageComposer() {
 
   let placeholder: string
   if (isClawTopic) {
-    // Extract claw name from activeChannel (claw:{id})
-    placeholder = `Message claw...`
+    placeholder = `Message ${chatState.clawName || 'claw'}...`
   } else if (chatState.connected && chatState.activeTopic != null) {
     const channel = chatState.channels.find(c => c.topic === chatState.activeTopic)
     placeholder = channel?.isP2P
@@ -33,9 +32,11 @@ export default function MessageComposer() {
     }
   }
 
+  const isBusy = isClawTopic && chatState.clawTyping
+
   async function handleSend() {
     const trimmed = text.trim()
-    if (!trimmed || !useLive) return
+    if (!trimmed || !useLive || isBusy) return
     setText('')
     try {
       await sendMessage(trimmed)
@@ -71,7 +72,7 @@ export default function MessageComposer() {
           <button
             className="send-btn"
             onClick={handleSend}
-            disabled={!text.trim() || !useLive}
+            disabled={!text.trim() || !useLive || isBusy}
           >
             Send
           </button>

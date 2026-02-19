@@ -24,7 +24,22 @@ export default function MessageList() {
         {chatState.clawMessages.map(msg => (
           <LiveMessage key={`${msg.ts}-${msg.seq}`} msg={msg} />
         ))}
-        {chatState.clawMessages.length === 0 && (
+        {chatState.clawTyping && (
+          <div className="message typing-indicator">
+            <div className="message-avatar avatar-bg-3">
+              {(chatState.clawName || '?').charAt(0).toUpperCase()}
+            </div>
+            <div className="message-content">
+              <div className="message-header">
+                <span className="message-author">{chatState.clawName}</span>
+              </div>
+              <div className="message-text typing-dots">
+                <span /><span /><span />
+              </div>
+            </div>
+          </div>
+        )}
+        {chatState.clawMessages.length === 0 && !chatState.clawTyping && (
           <div className="message-system"><span>No messages yet. Say something!</span></div>
         )}
       </div>
