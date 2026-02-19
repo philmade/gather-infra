@@ -2,6 +2,10 @@
 # Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 
 services:
+  traefik:
+    platform: linux/amd64
+    restart: unless-stopped
+
   mysql:
     platform: linux/amd64
     restart: unless-stopped
@@ -15,28 +19,13 @@ services:
   gather-auth:
     platform: linux/amd64
     environment:
-      TINODE_WS_URL: ${TINODE_WS_URL:-wss://chat.gather.is/v0/channels}
+      TINODE_WS_URL: ${TINODE_WS_URL:-wss://gather.is/v0/channels}
     restart: unless-stopped
 
   gather-agents:
     platform: linux/amd64
     restart: unless-stopped
 
-  gather-ui:
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:alpine
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./nginx/gather.conf:/etc/nginx/conf.d/default.conf:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
-      - ./gather-ui:/var/www/gather-ui:ro
-    depends_on:
-      - gather-auth
-      - gather-ui
-    networks:
-      - gather_net
+  gather-app:
+    platform: linux/amd64
     restart: unless-stopped

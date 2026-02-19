@@ -11,15 +11,16 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
+	dockerclient "github.com/docker/docker/client"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types/mount"
+	"github.com/docker/docker/api/types/network"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/apis"
 	"github.com/pocketbase/pocketbase/core"
@@ -176,19 +177,6 @@ func main() {
 
 		e.Router.POST("/api/designs/upload", func(re *core.RequestEvent) error {
 			return handleDesignUpload(app, re, jwtKey)
-		})
-
-		// --- Claw terminal proxy (path-based, PocketBase auth) ---
-		// Redirect /c/{name} → /c/{name}/ (trailing slash required for relative URLs)
-		e.Router.Any("/c/{name}", func(re *core.RequestEvent) error {
-			name := re.Request.PathValue("name")
-			http.Redirect(re.Response, re.Request, "/c/"+name+"/", http.StatusMovedPermanently)
-			return nil
-		})
-
-		// Proxy /c/{name}/{path...} → container:7681/{path}
-		e.Router.Any("/c/{name}/{path...}", func(re *core.RequestEvent) error {
-			return handleClawProxy(app, re)
 		})
 
 		return e.Next()
@@ -1322,91 +1310,6 @@ func ensureWaitlistCollection(app *pocketbase.PocketBase) error {
 }
 
 // =============================================================================
-// Claw terminal proxy (path-based)
-// =============================================================================
-
-func handleClawProxy(app *pocketbase.PocketBase, re *core.RequestEvent) error {
-	name := re.Request.PathValue("name")
-	remainder := re.Request.PathValue("path")
-
-	// Look up claw first (before auth) so typos get 404, not 401
-	records, err := app.FindRecordsByFilter("claw_deployments",
-		"subdomain = {:sub}", "", 1, 0,
-		map[string]any{"sub": name})
-	if err != nil || len(records) == 0 {
-		return apis.NewNotFoundError("Claw not found", nil)
-	}
-	record := records[0]
-
-	// Auth: try PB cookie/header first, then ?token= query param
-	var userID string
-	info, _ := re.RequestInfo()
-	if info.Auth != nil {
-		userID = info.Auth.Id
-	}
-
-	// Fallback: validate ?token= and set cookie for subsequent requests (WS, assets)
-	if userID == "" {
-		token := re.Request.URL.Query().Get("token")
-		if token != "" {
-			authRecord, err := app.FindAuthRecordByToken(token, "auth")
-			if err == nil {
-				userID = authRecord.Id
-				http.SetCookie(re.Response, &http.Cookie{
-					Name:     "pb_auth",
-					Value:    token,
-					Path:     "/c/",
-					HttpOnly: true,
-					Secure:   true,
-					SameSite: http.SameSiteLaxMode,
-					MaxAge:   3600,
-				})
-			}
-		}
-	}
-
-	if userID == "" {
-		// Browser-friendly redirect: send to app login with return URL
-		accept := re.Request.Header.Get("Accept")
-		if strings.Contains(accept, "text/html") {
-			redirectURL := fmt.Sprintf("https://app.gather.is/?redirect=/c/%s/", name)
-			http.Redirect(re.Response, re.Request, redirectURL, http.StatusFound)
-			return nil
-		}
-		return apis.NewUnauthorizedError("Authentication required", nil)
-	}
-
-	if record.GetString("user_id") != userID {
-		return apis.NewNotFoundError("Claw not found", nil)
-	}
-
-	status := record.GetString("status")
-	if status != "running" {
-		re.Response.Header().Set("Content-Type", "application/json")
-		re.Response.WriteHeader(http.StatusServiceUnavailable)
-		re.Response.Write([]byte(fmt.Sprintf(
-			`{"status":503,"message":"Claw is not running","claw_status":"%s"}`, status)))
-		return nil
-	}
-
-	containerName := record.GetString("container_id")
-	target, _ := url.Parse(fmt.Sprintf("http://%s:7681", containerName))
-
-	proxy := &httputil.ReverseProxy{
-		Director: func(req *http.Request) {
-			req.URL.Scheme = target.Scheme
-			req.URL.Host = target.Host
-			req.URL.Path = "/" + remainder
-			req.URL.RawQuery = re.Request.URL.RawQuery
-			req.Host = target.Host
-		},
-	}
-
-	proxy.ServeHTTP(re.Response, re.Request)
-	return nil
-}
-
-// =============================================================================
 // Claw deployment hooks
 // =============================================================================
 
@@ -1521,14 +1424,14 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 	app.Logger().Info("Claw agent identity created",
 		"id", record.Id, "agent_id", agentRec.Id, "channel_id", channelID)
 
-	// --- Launch Docker container with identity env vars ---
+	// --- Launch Docker container with identity env vars + Traefik labels ---
 	image := os.Getenv("CLAW_DOCKER_IMAGE")
 	if image == "" {
 		image = "gather-claw:latest"
 	}
-	network := os.Getenv("CLAW_DOCKER_NETWORK")
-	if network == "" {
-		network = "gather-infra_gather_net"
+	networkName := os.Getenv("CLAW_DOCKER_NETWORK")
+	if networkName == "" {
+		networkName = "gather-infra_gather_net"
 	}
 
 	// Base64-encode PEM keys (they contain newlines)
@@ -1540,19 +1443,21 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 		baseURL = "https://gather.is"
 	}
 
-	// Build env map: host defaults first, then vault overrides
-	// Map CLAW_LLM_* host vars to ClawPoint-Go equivalents
+	// Build env slice: host defaults first, then vault overrides
 	envMap := map[string]string{
 		"MODEL_PROVIDER": "anthropic",
 		"CLAWPOINT_ROOT": "/app",
 		"CLAWPOINT_DB":   "/app/data/messages.db",
+		"CLAW_NAME":      clawDisplayName,
+		"GATHER_PRIVATE_KEY": privB64,
+		"GATHER_PUBLIC_KEY":  pubB64,
+		"GATHER_AGENT_ID":   agentRec.Id,
+		"GATHER_CHANNEL_ID": channelID,
+		"GATHER_BASE_URL":   baseURL,
 	}
 	if v := os.Getenv("CLAW_LLM_API_KEY"); v != "" {
 		envMap["ANTHROPIC_API_KEY"] = v
 	}
-	// Note: CLAW_LLM_API_URL is OpenAI-compatible (z.ai/api/coding/paas/v4).
-	// ClawPoint-Go defaults to the Anthropic-compatible endpoint (z.ai/api/anthropic).
-	// Only override if CLAW_ANTHROPIC_API_BASE is explicitly set.
 	if v := os.Getenv("CLAW_ANTHROPIC_API_BASE"); v != "" {
 		envMap["ANTHROPIC_API_BASE"] = v
 	}
@@ -1569,59 +1474,93 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 		envMap[s.GetString("key")] = s.GetString("value")
 	}
 
+	var envSlice []string
+	for k, v := range envMap {
+		envSlice = append(envSlice, k+"="+v)
+	}
+
 	// Persistent data volume for memory DB and soul files
 	dataVolume := fmt.Sprintf("claw-data-%s", subdomain)
 
-	args := []string{"run", "-d",
-		"--name", containerName,
-		"--network", network,
-		"--restart", "unless-stopped",
-		"--memory", "512m",
-		"--cpus", "1",
-		"-v", fmt.Sprintf("%s:/app/data", dataVolume),
-		"-e", fmt.Sprintf("CLAW_NAME=%s", clawDisplayName),
-		"-e", fmt.Sprintf("GATHER_PRIVATE_KEY=%s", privB64),
-		"-e", fmt.Sprintf("GATHER_PUBLIC_KEY=%s", pubB64),
-		"-e", fmt.Sprintf("GATHER_AGENT_ID=%s", agentRec.Id),
-		"-e", fmt.Sprintf("GATHER_CHANNEL_ID=%s", channelID),
-		"-e", fmt.Sprintf("GATHER_BASE_URL=%s", baseURL),
+	// Traefik labels for dynamic routing: {subdomain}.gather.is → container:8080
+	routerName := "claw-" + subdomain
+	labels := map[string]string{
+		"traefik.enable": "true",
+		"traefik.http.routers." + routerName + ".rule":             "Host(`" + subdomain + ".gather.is`)",
+		"traefik.http.routers." + routerName + ".entrypoints":      "websecure",
+		"traefik.http.routers." + routerName + ".tls.certresolver": "cf",
+		"traefik.http.services." + routerName + ".loadbalancer.server.port": "8080",
 	}
-	for k, v := range envMap {
-		args = append(args, "-e", fmt.Sprintf("%s=%s", k, v))
-	}
-	args = append(args, image)
 
-	cmd := exec.Command("docker", args...)
-	output, err := cmd.CombinedOutput()
+	ctx := context.Background()
+	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
 	if err != nil {
 		record.Set("status", "failed")
-		record.Set("error_message", strings.TrimSpace(string(output)))
-		if saveErr := app.Save(record); saveErr != nil {
-			app.Logger().Error("Failed to save claw failure", "id", record.Id, "error", saveErr)
-		}
+		record.Set("error_message", "Docker client init failed: "+err.Error())
+		app.Save(record)
+		app.Logger().Error("Failed to create Docker client", "id", record.Id, "error", err)
+		return
+	}
+	defer cli.Close()
+
+	resp, err := cli.ContainerCreate(ctx,
+		&container.Config{
+			Image:  image,
+			Env:    envSlice,
+			Labels: labels,
+		},
+		&container.HostConfig{
+			RestartPolicy: container.RestartPolicy{Name: "unless-stopped"},
+			Resources: container.Resources{
+				Memory:   512 * 1024 * 1024, // 512 MB
+				NanoCPUs: 1e9,               // 1 CPU
+			},
+			Mounts: []mount.Mount{{
+				Type:   mount.TypeVolume,
+				Source: dataVolume,
+				Target: "/app/data",
+			}},
+		},
+		&network.NetworkingConfig{
+			EndpointsConfig: map[string]*network.EndpointSettings{
+				networkName: {},
+			},
+		},
+		nil,
+		containerName,
+	)
+	if err != nil {
+		record.Set("status", "failed")
+		record.Set("error_message", err.Error())
+		app.Save(record)
 		app.Logger().Error("Failed to create claw container",
-			"id", record.Id, "container", containerName, "error", err, "output", string(output))
+			"id", record.Id, "container", containerName, "error", err)
+		return
+	}
+
+	if err := cli.ContainerStart(ctx, resp.ID, container.StartOptions{}); err != nil {
+		record.Set("status", "failed")
+		record.Set("error_message", "Container start failed: "+err.Error())
+		app.Save(record)
+		// Clean up created-but-not-started container
+		cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
+		app.Logger().Error("Failed to start claw container",
+			"id", record.Id, "container", containerName, "error", err)
 		return
 	}
 
 	// Verify container is running
-	inspect := exec.Command("docker", "inspect", "--format", "{{.State.Running}}", containerName)
-	inspectOut, err := inspect.CombinedOutput()
-	running := strings.TrimSpace(string(inspectOut)) == "true"
-
-	if err != nil || !running {
+	info, err := cli.ContainerInspect(ctx, resp.ID)
+	if err != nil || !info.State.Running {
 		record.Set("status", "failed")
 		record.Set("error_message", "Container started but is not running")
-		if saveErr := app.Save(record); saveErr != nil {
-			app.Logger().Error("Failed to save claw failure", "id", record.Id, "error", saveErr)
-		}
-		// Clean up the failed container
-		exec.Command("docker", "rm", "-f", containerName).Run()
+		app.Save(record)
+		cli.ContainerRemove(ctx, resp.ID, container.RemoveOptions{Force: true})
 		return
 	}
 
 	record.Set("status", "running")
-	record.Set("url", fmt.Sprintf("https://app.gather.is/c/%s/", subdomain))
+	record.Set("url", fmt.Sprintf("https://%s.gather.is", subdomain))
 	if err := app.Save(record); err != nil {
 		app.Logger().Error("Failed to save claw running status", "id", record.Id, "error", err)
 	} else {

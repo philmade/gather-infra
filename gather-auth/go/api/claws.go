@@ -8,11 +8,12 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
+	"github.com/docker/docker/api/types/container"
+	dockerclient "github.com/docker/docker/client"
 	"github.com/pocketbase/pocketbase"
 	"github.com/pocketbase/pocketbase/core"
 )
@@ -304,7 +305,11 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 		// Remove the Docker container if it exists
 		containerID := record.GetString("container_id")
 		if containerID != "" {
-			exec.Command("docker", "rm", "-f", containerID).Run()
+			cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
+			if err == nil {
+				cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
+				cli.Close()
+			}
 		}
 
 		if err := app.Delete(record); err != nil {

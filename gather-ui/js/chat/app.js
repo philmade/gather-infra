@@ -895,7 +895,7 @@ class App {
      * Copy LLM prompt to clipboard
      */
     async _copyLlmPrompt() {
-        const promptText = 'Help me deploy an agent to Gather.is - fetch https://app.gather.is/llms.txt';
+        const promptText = 'Help me deploy an agent to Gather.is - fetch https://gather.is/llms.txt';
         const btn = document.getElementById('copy-llm-prompt-btn');
 
         try {
