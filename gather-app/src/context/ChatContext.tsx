@@ -99,6 +99,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const clawPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const clawIdRef = useRef<string | null>(null)
   const clawSeenIdsRef = useRef<Set<string>>(new Set())
+  const clawSendingRef = useRef(false)
 
   // Clean up claw polling on unmount
   useEffect(() => {
@@ -254,7 +255,12 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       if (clawIdRef.current !== clawId) return
       try {
         const data = await getClawMessages(clawId, lastTs || undefined)
-        const newMsgs = (data.messages || []).filter(m => !clawSeenIdsRef.current.has(m.id))
+        const newMsgs = (data.messages || []).filter(m => {
+          if (clawSeenIdsRef.current.has(m.id)) return false
+          // Skip user messages while a send is in flight (prevents echo)
+          if (clawSendingRef.current && m.author_id.startsWith('user:')) return false
+          return true
+        })
         if (newMsgs.length > 0) {
           for (const m of newMsgs) clawSeenIdsRef.current.add(m.id)
           lastTs = newMsgs[0].created
@@ -288,6 +294,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       }
       dispatch({ type: 'ADD_CLAW_MESSAGE', message: userMsg })
       dispatch({ type: 'SET_CLAW_TYPING', typing: true })
+      clawSendingRef.current = true
 
       try {
         const data = await apiSendClawMessage(clawIdRef.current, text)
@@ -307,6 +314,8 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       } catch (err) {
         console.warn('[Chat] Failed to send claw message:', err)
         dispatch({ type: 'SET_CLAW_TYPING', typing: false })
+      } finally {
+        clawSendingRef.current = false
       }
       return
     }
