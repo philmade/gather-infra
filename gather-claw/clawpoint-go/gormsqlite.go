@@ -38,11 +38,25 @@ func (d *sqliteDialector) Initialize(db *gorm.DB) error {
 }
 
 func (d *sqliteDialector) Migrator(db *gorm.DB) gorm.Migrator {
-	return migrator.Migrator{Config: migrator.Config{
+	return sqliteMigrator{migrator.Migrator{Config: migrator.Config{
 		DB:                          db,
 		Dialector:                   d,
 		CreateIndexAfterCreateTable: true,
-	}}
+	}}}
+}
+
+// sqliteMigrator overrides HasTable to query sqlite_master instead of
+// information_schema (which doesn't exist in SQLite).
+type sqliteMigrator struct {
+	migrator.Migrator
+}
+
+func (m sqliteMigrator) HasTable(value interface{}) bool {
+	var count int
+	m.RunWithValue(value, func(stmt *gorm.Statement) error {
+		return m.DB.Raw("SELECT count(*) FROM sqlite_master WHERE type='table' AND name=?", stmt.Table).Row().Scan(&count)
+	})
+	return count > 0
 }
 
 func (d *sqliteDialector) DataTypeOf(field *schema.Field) string {
