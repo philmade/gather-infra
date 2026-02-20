@@ -21,6 +21,7 @@ import (
 func main() {
 	listenAddr := getEnv("PROXY_ADDR", ":8080")
 	adkAddr := getEnv("ADK_INTERNAL", "http://127.0.0.1:8081")
+	bridgeAddr := getEnv("BRIDGE_INTERNAL", "http://127.0.0.1:8082")
 	publicDir := getEnv("PUBLIC_DIR", "/app/public")
 
 	// Parse ADK backend URL
@@ -29,12 +30,28 @@ func main() {
 		log.Fatalf("invalid ADK_INTERNAL url: %v", err)
 	}
 
-	// Reverse proxy for /api/* routes
+	// Parse bridge backend URL
+	bridgeURL, err := url.Parse(bridgeAddr)
+	if err != nil {
+		log.Fatalf("invalid BRIDGE_INTERNAL url: %v", err)
+	}
+
+	// Reverse proxy for /api/* routes → ADK
 	proxy := httputil.NewSingleHostReverseProxy(adkURL)
+
+	// Reverse proxy for /msg → bridge middleware
+	bridgeProxy := httputil.NewSingleHostReverseProxy(bridgeURL)
 
 	mux := http.NewServeMux()
 
-	// API routes → ADK
+	// /msg → bridge middleware (unified message pipeline)
+	mux.HandleFunc("/msg", func(w http.ResponseWriter, r *http.Request) {
+		// Rewrite path: /msg → /message (bridge endpoint)
+		r.URL.Path = "/message"
+		bridgeProxy.ServeHTTP(w, r)
+	})
+
+	// API routes → ADK (direct, no middleware — dev/debug)
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		proxy.ServeHTTP(w, r)
 	})
@@ -53,6 +70,7 @@ func main() {
 	fmt.Printf("ClawPoint proxy starting...\n")
 	fmt.Printf("  Listen:  %s\n", listenAddr)
 	fmt.Printf("  ADK:     %s\n", adkAddr)
+	fmt.Printf("  Bridge:  %s\n", bridgeAddr)
 	fmt.Printf("  Public:  %s\n", publicDir)
 
 	server := &http.Server{Addr: listenAddr, Handler: mux}

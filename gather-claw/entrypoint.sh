@@ -65,11 +65,9 @@ echo "Starting clawpoint-proxy on :8080..."
 PROXY_ADDR=":8080" ADK_INTERNAL="http://127.0.0.1:${ADK_PORT}" PUBLIC_DIR="/app/public" \
     ./clawpoint-proxy > /tmp/proxy.log 2>&1 &
 
-# --- Start bridge (if matterbridge running) ---
-if [ -n "$TELEGRAM_BOT" ]; then
-    echo "Starting clawpoint-bridge..."
-    ADK_URL="http://127.0.0.1:${ADK_PORT}" ./clawpoint-bridge > /tmp/bridge.log 2>&1 &
-fi
+# --- Start bridge (always — serves Gather UI messages + Telegram if configured) ---
+echo "Starting clawpoint-bridge..."
+ADK_URL="http://127.0.0.1:${ADK_PORT}" ./clawpoint-bridge > /tmp/bridge.log 2>&1 &
 
 # --- Medic as foreground supervisor ---
 echo "Starting clawpoint-medic..."

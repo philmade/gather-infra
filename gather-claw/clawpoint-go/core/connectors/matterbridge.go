@@ -25,6 +25,7 @@ type MatterbridgeConnector struct {
 	httpClient    *http.Client
 	sessions      map[string]string // userID -> sessionID
 	mu            sync.Mutex
+	middleware    *Middleware // Token estimation + compaction pipeline
 }
 
 // MBMessage represents a Matterbridge message.
@@ -52,6 +53,7 @@ func NewMatterbridgeConnector(adkURL string) *MatterbridgeConnector {
 		telegramToken: os.Getenv("TELEGRAM_BOT"),
 		httpClient:    &http.Client{Timeout: 120 * time.Second},
 		sessions:      make(map[string]string),
+		middleware:    NewMiddleware(adkURL),
 	}
 }
 
@@ -178,7 +180,7 @@ func (m *MatterbridgeConnector) startTypingLoop(chatID string) context.CancelFun
 	return cancel
 }
 
-// routeToADK sends a message to the ADK agent and returns the response.
+// routeToADK sends a message to the ADK agent via the middleware pipeline.
 func (m *MatterbridgeConnector) routeToADK(ctx context.Context, msg MBMessage) (string, error) {
 	userID := msg.UserID
 	if userID == "" {
@@ -199,7 +201,21 @@ func (m *MatterbridgeConnector) routeToADK(ctx context.Context, msg MBMessage) (
 	}
 	text := fmt.Sprintf("MESSAGE from %s via %s:\n%s", msg.Username, proto, msg.Text)
 
-	return m.sendRunSSE(ctx, userID, sessionID, text)
+	// Route through middleware (token estimation + compaction + ADK call)
+	result, err := m.middleware.ProcessMessage(ctx, userID, sessionID, text)
+	if err != nil {
+		return "", err
+	}
+
+	// If middleware compacted and created a new session, update our mapping
+	if result.SessionID != sessionID {
+		m.mu.Lock()
+		m.sessions[userID] = result.SessionID
+		m.mu.Unlock()
+		fmt.Printf("  session updated: %s → %s (compacted)\n", truncateStr(sessionID, 8), truncateStr(result.SessionID, 8))
+	}
+
+	return result.Text, nil
 }
 
 // getOrCreateSession finds the most recent existing session for this user,
@@ -275,90 +291,6 @@ func (m *MatterbridgeConnector) getOrCreateSession(userID string) (string, error
 	return sessionID, nil
 }
 
-// sendRunSSE sends a message via the ADK run_sse endpoint and collects the response.
-func (m *MatterbridgeConnector) sendRunSSE(ctx context.Context, userID, sessionID, text string) (string, error) {
-	payload := map[string]any{
-		"appName":   m.appName,
-		"userId":    userID,
-		"sessionId": sessionID,
-		"newMessage": map[string]any{
-			"role": "user",
-			"parts": []map[string]any{
-				{"text": text},
-			},
-		},
-	}
-
-	jsonPayload, _ := json.Marshal(payload)
-
-	req, err := http.NewRequestWithContext(ctx, "POST", m.adkURL+"/api/run_sse", bytes.NewReader(jsonPayload))
-	if err != nil {
-		return "", err
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Accept", "text/event-stream")
-
-	client := &http.Client{Timeout: 300 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("run_sse HTTP %d: %s", resp.StatusCode, string(body))
-	}
-
-	return m.parseSSEResponse(resp.Body)
-}
-
-// parseSSEResponse reads SSE events and extracts the agent's text response.
-func (m *MatterbridgeConnector) parseSSEResponse(r io.Reader) (string, error) {
-	scanner := bufio.NewScanner(r)
-	var lastText string
-
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if strings.HasPrefix(line, "Error while running agent:") {
-			return "", fmt.Errorf("%s", line)
-		}
-
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-
-		data := line[6:]
-		var event map[string]any
-		if err := json.Unmarshal([]byte(data), &event); err != nil {
-			continue
-		}
-
-		content, ok := event["content"].(map[string]any)
-		if !ok {
-			continue
-		}
-
-		parts, ok := content["parts"].([]any)
-		if !ok {
-			continue
-		}
-
-		for _, p := range parts {
-			part, ok := p.(map[string]any)
-			if !ok {
-				continue
-			}
-			if text, ok := part["text"].(string); ok && text != "" {
-				lastText = text
-			}
-		}
-	}
-
-	return lastText, nil
-}
-
 // SendMessage sends a message back to Matterbridge.
 func (m *MatterbridgeConnector) SendMessage(text string) error {
 	payload := map[string]string{
@@ -384,6 +316,107 @@ func (m *MatterbridgeConnector) SendMessage(text string) error {
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
+	return nil
+}
+
+// BridgeRequest is the JSON body for POST /message on the bridge HTTP server.
+type BridgeRequest struct {
+	UserID   string `json:"user_id"`
+	Username string `json:"username"`
+	Text     string `json:"text"`
+	Protocol string `json:"protocol"`
+}
+
+// BridgeResponse is the JSON response from the bridge HTTP server.
+type BridgeResponse struct {
+	Text  string `json:"text"`
+	Error string `json:"error,omitempty"`
+}
+
+// ServeHTTP starts an HTTP server for receiving messages from external sources.
+// POST /message accepts a BridgeRequest and returns the agent's response synchronously.
+func (m *MatterbridgeConnector) ServeHTTP(ctx context.Context, addr string) error {
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/message", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req BridgeRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(BridgeResponse{Error: "invalid JSON"})
+			return
+		}
+
+		if req.Text == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(BridgeResponse{Error: "text is required"})
+			return
+		}
+
+		userID := req.UserID
+		if userID == "" {
+			userID = req.Username
+		}
+		if userID == "" {
+			userID = "anonymous"
+		}
+
+		proto := req.Protocol
+		if proto == "" {
+			proto = "api"
+		}
+
+		fmt.Printf("[%s] %s: %s\n", proto, req.Username, truncateStr(req.Text, 80))
+
+		sessionID, err := m.getOrCreateSession(userID)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(BridgeResponse{Error: fmt.Sprintf("session: %v", err)})
+			return
+		}
+
+		text := fmt.Sprintf("MESSAGE from %s via %s:\n%s", req.Username, proto, req.Text)
+
+		// Route through middleware (token estimation + compaction + ADK call)
+		result, err := m.middleware.ProcessMessage(ctx, userID, sessionID, text)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadGateway)
+			json.NewEncoder(w).Encode(BridgeResponse{Error: fmt.Sprintf("adk: %v", err)})
+			return
+		}
+
+		// Update session mapping if compaction occurred
+		if result.SessionID != sessionID {
+			m.mu.Lock()
+			m.sessions[userID] = result.SessionID
+			m.mu.Unlock()
+		}
+
+		fmt.Printf("  -> [%s] %d chars\n", proto, len(result.Text))
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(BridgeResponse{Text: result.Text})
+	})
+
+	server := &http.Server{Addr: addr, Handler: mux}
+
+	go func() {
+		<-ctx.Done()
+		server.Close()
+	}()
+
+	fmt.Printf("Bridge HTTP server listening on %s\n", addr)
+	if err := server.ListenAndServe(); err != http.ErrServerClosed {
+		return err
+	}
 	return nil
 }
 

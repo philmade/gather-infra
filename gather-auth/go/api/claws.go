@@ -588,97 +588,66 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 }
 
 // ---------------------------------------------------------------------------
-// ADK proxy — forward user messages to the claw container's ADK API
+// Bridge proxy — forward user messages to the claw's bridge middleware
 // ---------------------------------------------------------------------------
 
-// adkRunRequest is the JSON body for POST /api/run on the ADK server.
-type adkRunRequest struct {
-	AppName    string     `json:"appName"`
-	UserID     string     `json:"userId"`
-	SessionID  string     `json:"sessionId"`
-	NewMessage adkMessage `json:"newMessage"`
+// bridgeRequest is the JSON body for POST /msg on the claw proxy (→ bridge).
+type bridgeRequest struct {
+	UserID   string `json:"user_id"`
+	Username string `json:"username"`
+	Text     string `json:"text"`
+	Protocol string `json:"protocol"`
 }
 
-type adkMessage struct {
-	Role  string    `json:"role"`
-	Parts []adkPart `json:"parts"`
-}
-
-type adkPart struct {
-	Text string `json:"text"`
-}
-
-type adkEvent struct {
-	Content *adkMessage `json:"content,omitempty"`
-	Author  string      `json:"author,omitempty"`
+// bridgeResponse is the JSON response from the bridge.
+type bridgeResponse struct {
+	Text  string `json:"text"`
+	Error string `json:"error,omitempty"`
 }
 
 var adkClient = &http.Client{Timeout: 120 * time.Second}
 
-// sendToADK forwards a user message to the claw's ADK API and returns the agent's text response.
+// sendToADK forwards a user message to the claw's bridge middleware and returns the agent's text response.
+// The bridge handles session management, token estimation, and compaction.
 func sendToADK(containerName, userID, text string) (string, error) {
 	base := fmt.Sprintf("http://%s:8080", containerName)
-	sessionID := fmt.Sprintf("chat-%s", userID)
 
-	// Ensure session exists (idempotent — ADK returns existing if already created)
-	sessURL := fmt.Sprintf("%s/api/apps/clawpoint/users/%s/sessions/%s", base, userID, sessionID)
-	sessReq, _ := http.NewRequest("POST", sessURL, bytes.NewBufferString("{}"))
-	sessReq.Header.Set("Content-Type", "application/json")
-	sessResp, err := adkClient.Do(sessReq)
-	if err != nil {
-		return "", fmt.Errorf("ADK session create failed: %w", err)
-	}
-	sessResp.Body.Close()
-
-	// Send the message
-	body, _ := json.Marshal(adkRunRequest{
-		AppName:   "clawpoint",
-		UserID:    userID,
-		SessionID: sessionID,
-		NewMessage: adkMessage{
-			Role:  "user",
-			Parts: []adkPart{{Text: text}},
-		},
+	body, _ := json.Marshal(bridgeRequest{
+		UserID:   userID,
+		Username: userID,
+		Text:     text,
+		Protocol: "gather-ui",
 	})
 
-	runResp, err := adkClient.Post(base+"/api/run", "application/json", bytes.NewReader(body))
+	resp, err := adkClient.Post(base+"/msg", "application/json", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("ADK run failed: %w", err)
+		return "", fmt.Errorf("bridge request failed: %w", err)
 	}
-	defer runResp.Body.Close()
+	defer resp.Body.Close()
 
-	respBody, err := io.ReadAll(runResp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("ADK response read failed: %w", err)
+		return "", fmt.Errorf("bridge response read failed: %w", err)
 	}
 
-	if runResp.StatusCode != 200 {
-		return "", fmt.Errorf("ADK returned %d: %s", runResp.StatusCode, string(respBody))
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("bridge returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	// Parse ADK response — array of events, find the last model response
-	var events []adkEvent
-	if err := json.Unmarshal(respBody, &events); err != nil {
-		return "", fmt.Errorf("ADK response parse failed: %w", err)
+	var result bridgeResponse
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return "", fmt.Errorf("bridge response parse failed: %w", err)
 	}
 
-	// Walk events in reverse to find the last model content
-	for i := len(events) - 1; i >= 0; i-- {
-		ev := events[i]
-		if ev.Content != nil && ev.Content.Role == "model" && len(ev.Content.Parts) > 0 {
-			var parts []string
-			for _, p := range ev.Content.Parts {
-				if p.Text != "" {
-					parts = append(parts, p.Text)
-				}
-			}
-			if len(parts) > 0 {
-				return strings.Join(parts, "\n"), nil
-			}
-		}
+	if result.Error != "" {
+		return "", fmt.Errorf("bridge error: %s", result.Error)
 	}
 
-	return "", fmt.Errorf("no model response in ADK events")
+	if result.Text == "" {
+		return "", fmt.Errorf("no response from agent")
+	}
+
+	return result.Text, nil
 }
 
 // extractPBUserID parses a PocketBase auth token and returns the user ID.

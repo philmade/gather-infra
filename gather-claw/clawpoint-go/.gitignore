@@ -1,6 +1,8 @@
 # Compiled binaries (built by Docker, not committed)
-clawpoint-go
-clawpoint-medic
-clawpoint-bridge
-clawpoint-proxy
+/clawpoint-go
+/clawpoint-medic
+/clawpoint-bridge
+/clawpoint-proxy
+/bridge
+/proxy
 *.db
