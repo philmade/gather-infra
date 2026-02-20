@@ -303,6 +303,31 @@ func ensureCollections(app *pocketbase.PocketBase) error {
 	if err := ensureClawSecretsCollection(app); err != nil {
 		return err
 	}
+	if err := ensureUserFields(app); err != nil {
+		return err
+	}
+	return nil
+}
+
+// ensureUserFields adds custom fields to the PocketBase users auth collection.
+func ensureUserFields(app *pocketbase.PocketBase) error {
+	c, err := app.FindCollectionByNameOrId("users")
+	if err != nil {
+		return nil // users collection not found — PocketBase will create it
+	}
+
+	changed := false
+	if c.Fields.GetByName("free_tier") == nil {
+		c.Fields.Add(&core.BoolField{Name: "free_tier"})
+		changed = true
+	}
+
+	if changed {
+		if err := app.Save(c); err != nil {
+			return fmt.Errorf("migrate users fields: %w", err)
+		}
+		app.Logger().Info("Added free_tier field to users collection")
+	}
 	return nil
 }
 
@@ -1351,11 +1376,24 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 	containerName := fmt.Sprintf("claw-%s", subdomain)
 	clawDisplayName := record.GetString("name")
 
+	// Check if user has free_tier grant
+	userID := record.GetString("user_id")
+	isFreeTier := false
+	if userRec, err := app.FindRecordById("users", userID); err == nil {
+		isFreeTier = userRec.GetBool("free_tier")
+	}
+
 	record.Set("subdomain", subdomain)
 	record.Set("status", "provisioning")
 	record.Set("container_id", containerName)
-	record.Set("trial_ends_at", time.Now().Add(30*time.Minute).UTC().Format(time.RFC3339))
-	record.Set("paid", false)
+	if isFreeTier {
+		record.Set("paid", true)
+		record.Set("trial_ends_at", "")
+		app.Logger().Info("Free tier grant applied", "user_id", userID, "claw", clawDisplayName)
+	} else {
+		record.Set("trial_ends_at", time.Now().Add(30*time.Minute).UTC().Format(time.RFC3339))
+		record.Set("paid", false)
+	}
 	record.Set("trial_warned", false)
 	if err := app.Save(record); err != nil {
 		app.Logger().Error("Failed to transition claw to provisioning",
@@ -1481,7 +1519,6 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 	}
 
 	// Inject user's vault secrets (overrides host defaults)
-	userID := record.GetString("user_id")
 	secrets, _ := app.FindRecordsByFilter("claw_secrets",
 		"user_id = {:uid}", "", 100, 0,
 		map[string]any{"uid": userID})
