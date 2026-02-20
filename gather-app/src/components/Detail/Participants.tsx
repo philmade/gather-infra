@@ -48,6 +48,7 @@ export default function Participants() {
       try {
         const resp = await fetch(pb.baseURL + '/api/claws', {
           headers: { Authorization: `Bearer ${pb.authStore.token}` },
+          cache: 'no-store',
         })
         if (resp.ok) {
           const data = await resp.json()

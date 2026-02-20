@@ -21,6 +21,7 @@ function authHeaders(): Record<string, string> {
 async function apiFetch<T = unknown>(path: string, options: RequestInit = {}): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, {
     headers: authHeaders(),
+    cache: 'no-store',
     ...options,
   })
 

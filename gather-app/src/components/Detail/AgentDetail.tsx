@@ -63,6 +63,7 @@ export default function AgentDetail() {
       try {
         const resp = await fetch(pb.baseURL + `/api/claws/${state.selectedAgent}`, {
           headers: { Authorization: `Bearer ${pb.authStore.token}` },
+          cache: 'no-store',
         })
         if (resp.ok) {
           const data = await resp.json()
