@@ -28,7 +28,7 @@ RemoteNickFormat="[{PROTOCOL}] <{NICK}> "
 BindAddress="127.0.0.1:4242"
 
 [[gateway]]
-name="claw"
+name="clawpoint"
 enable=true
 
 [[gateway.inout]]
