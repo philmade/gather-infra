@@ -25,6 +25,7 @@ const statusLabel: Record<string, string> = {
   queued: 'Queued',
   provisioning: 'Provisioning...',
   running: 'Running',
+  expired: 'Trial Expired',
   stopped: 'Stopped',
   failed: 'Failed',
 }
@@ -33,6 +34,7 @@ const statusClass: Record<string, string> = {
   queued: 'status-idle',
   provisioning: 'status-idle',
   running: 'status-running',
+  expired: 'status-stopped',
   stopped: 'status-stopped',
   failed: 'status-stopped',
 }

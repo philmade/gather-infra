@@ -26,6 +26,7 @@ const statusLabel: Record<string, string> = {
   queued: 'Queued',
   provisioning: 'Provisioning...',
   running: 'Running',
+  expired: 'Trial Expired',
   stopped: 'Stopped',
   failed: 'Failed',
 }
@@ -151,7 +152,7 @@ export default function AgentDetail() {
 
   // Load env vars when claw is loaded and running
   useEffect(() => {
-    if (!claw || claw.status !== 'running') return
+    if (!claw || (claw.status !== 'running' && claw.status !== 'expired')) return
     setEnvLoading(true)
     getClawEnv(claw.id)
       .then(({ vars }) => {
@@ -271,7 +272,10 @@ export default function AgentDetail() {
   const statusText = statusLabel[claw.status] || claw.status
   const statusCls = claw.status === 'running' ? 'status-running'
     : claw.status === 'failed' || claw.status === 'stopped' ? 'status-stopped'
+    : claw.status === 'expired' ? 'status-stopped'
     : 'status-idle'
+
+  const showConfig = claw.status === 'running' || claw.status === 'expired'
 
   return (
     <div className="agent-detail active">
@@ -421,7 +425,7 @@ export default function AgentDetail() {
         )}
       </div>
 
-      {claw.status === 'running' && (
+      {showConfig && (
         <div style={{ marginBottom: 'var(--space-md)' }}>
           <div style={{ fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 'var(--space-sm)' }}>
             Configuration
@@ -525,7 +529,7 @@ export default function AgentDetail() {
         </div>
       )}
 
-      {claw.status === 'running' && (
+      {showConfig && (
         <div style={{ marginBottom: 'var(--space-md)' }}>
           <div
             style={{ fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 'var(--space-sm)', cursor: 'pointer', userSelect: 'none' }}
