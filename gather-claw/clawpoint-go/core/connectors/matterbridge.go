@@ -391,7 +391,7 @@ func (m *MatterbridgeConnector) ServeHTTP(ctx context.Context, addr string) erro
 			m.mu.Unlock()
 		}
 
-		fmt.Printf("  -> [%s] %d chars\n", proto, len(result.Text))
+		fmt.Printf("  -> sent %d chars\n", len(result.Text))
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(BridgeResponse{Text: result.Text})
