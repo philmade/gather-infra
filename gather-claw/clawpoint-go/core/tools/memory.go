@@ -98,6 +98,46 @@ func (m *MemoryTool) Search(query string) ([]string, error) {
 	return results, nil
 }
 
+// LatestContinuation returns the most recent "continuation" memory, or empty string if none.
+func (m *MemoryTool) LatestContinuation() string {
+	var content string
+	err := m.db.QueryRow(
+		`SELECT content FROM memories
+		 WHERE type = 'continuation'
+		 ORDER BY created_at DESC
+		 LIMIT 1`,
+	).Scan(&content)
+	if err != nil {
+		return ""
+	}
+	return content
+}
+
+// RecentHighlight returns the N most recent memories (by importance, then recency).
+func (m *MemoryTool) RecentHighlight(limit int) []string {
+	rows, err := m.db.Query(
+		`SELECT content FROM memories
+		 WHERE type != 'continuation'
+		 ORDER BY importance DESC, created_at DESC
+		 LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	var results []string
+	for rows.Next() {
+		var content string
+		if err := rows.Scan(&content); err != nil {
+			continue
+		}
+		results = append(results, content)
+	}
+	return results
+}
+
 // Close closes the database connection
 func (m *MemoryTool) Close() error {
 	return m.db.Close()

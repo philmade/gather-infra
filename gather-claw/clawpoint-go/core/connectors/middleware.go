@@ -77,11 +77,17 @@ type ProcessResult struct {
 }
 
 // ProcessMessage is the unified middleware pipeline:
-// 1. Estimate token count of existing session events
-// 2. If over threshold → compact (summarize + store memories + new session)
-// 3. Forward message to ADK run_sse
-// 4. Return response text + actual session ID used
+// 1. If heartbeat → load continuation memory + recent memories as context
+// 2. Estimate token count of existing session events
+// 3. If over threshold → compact (summarize + store memories + new session)
+// 4. Forward message to ADK run_sse
+// 5. Return response text + actual session ID used
 func (mw *Middleware) ProcessMessage(ctx context.Context, userID, sessionID, text string) (*ProcessResult, error) {
+	// Heartbeat context injection: load memories to give the agent continuity
+	if strings.HasPrefix(text, "[HEARTBEAT]") {
+		text = mw.injectHeartbeatContext(text)
+	}
+
 	// Estimate tokens
 	tokens, err := mw.estimateSessionTokens(sessionID)
 	if err != nil {
@@ -109,6 +115,75 @@ func (mw *Middleware) ProcessMessage(ctx context.Context, userID, sessionID, tex
 	}
 
 	return &ProcessResult{Text: response, SessionID: sessionID}, nil
+}
+
+// injectHeartbeatContext loads the latest continuation memory and recent highlights
+// from the memory database, and appends them to the heartbeat message so the agent
+// has continuity between heartbeat cycles.
+func (mw *Middleware) injectHeartbeatContext(text string) string {
+	dbPath := mw.messagesDBPath
+	if dbPath == "" {
+		return text
+	}
+
+	db, err := sql.Open("sqlite", dbPath+"?mode=ro")
+	if err != nil {
+		log.Printf("  heartbeat context: db open failed: %v", err)
+		return text
+	}
+	defer db.Close()
+
+	var sb strings.Builder
+	sb.WriteString(text)
+
+	// Load latest continuation memory (what I was last doing)
+	var continuation string
+	err = db.QueryRow(
+		`SELECT content FROM memories
+		 WHERE type = 'continuation'
+		 ORDER BY created_at DESC LIMIT 1`,
+	).Scan(&continuation)
+
+	if err == nil && continuation != "" {
+		sb.WriteString("\n\n--- YOUR LAST SESSION ---\n")
+		sb.WriteString(continuation)
+	}
+
+	// Load recent high-importance memories (excluding continuations)
+	rows, err := db.Query(
+		`SELECT content FROM memories
+		 WHERE type != 'continuation'
+		 ORDER BY importance DESC, created_at DESC
+		 LIMIT 3`,
+	)
+	if err == nil {
+		defer rows.Close()
+		var memories []string
+		for rows.Next() {
+			var content string
+			if rows.Scan(&content) == nil && content != "" {
+				// Truncate long memories to keep context manageable
+				if len(content) > 500 {
+					content = content[:500] + "..."
+				}
+				memories = append(memories, content)
+			}
+		}
+		if len(memories) > 0 {
+			sb.WriteString("\n\n--- RECENT MEMORIES ---\n")
+			for _, mem := range memories {
+				sb.WriteString("- ")
+				sb.WriteString(mem)
+				sb.WriteString("\n")
+			}
+		}
+	}
+
+	enriched := sb.String()
+	if enriched != text {
+		log.Printf("  heartbeat context: injected continuation + %d memories", 3)
+	}
+	return enriched
 }
 
 // estimateSessionTokens queries sessions.db for all events in a session and
