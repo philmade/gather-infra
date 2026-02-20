@@ -202,7 +202,9 @@ func (m *MatterbridgeConnector) routeToADK(ctx context.Context, msg MBMessage) (
 	return m.sendRunSSE(ctx, userID, sessionID, text)
 }
 
-// getOrCreateSession gets an existing session or creates one.
+// getOrCreateSession finds the most recent existing session for this user,
+// or creates a new one if none exist. Sessions persist in SQLite across restarts,
+// so the agent maintains full conversation history within a session.
 func (m *MatterbridgeConnector) getOrCreateSession(userID string) (string, error) {
 	m.mu.Lock()
 	if sid, ok := m.sessions[userID]; ok {
@@ -211,16 +213,48 @@ func (m *MatterbridgeConnector) getOrCreateSession(userID string) (string, error
 	}
 	m.mu.Unlock()
 
-	url := fmt.Sprintf("%s/api/apps/%s/users/%s/sessions", m.adkURL, m.appName, userID)
-	resp, err := m.httpClient.Post(url, "application/json", strings.NewReader("{}"))
+	// Try to find an existing session for this user
+	listURL := fmt.Sprintf("%s/api/apps/%s/users/%s/sessions", m.adkURL, m.appName, userID)
+	resp, err := m.httpClient.Get(listURL)
+	if err == nil {
+		defer resp.Body.Close()
+		if resp.StatusCode == 200 {
+			body, _ := io.ReadAll(resp.Body)
+			var sessions []map[string]any
+			if err := json.Unmarshal(body, &sessions); err == nil && len(sessions) > 0 {
+				// Use the most recently updated session
+				var bestID string
+				var bestTime string
+				for _, s := range sessions {
+					sid, _ := s["id"].(string)
+					updated, _ := s["lastUpdateTime"].(string)
+					if sid != "" && updated >= bestTime {
+						bestID = sid
+						bestTime = updated
+					}
+				}
+				if bestID != "" {
+					m.mu.Lock()
+					m.sessions[userID] = bestID
+					m.mu.Unlock()
+					fmt.Printf("  session resumed: %s (user: %s)\n", bestID[:8], userID)
+					return bestID, nil
+				}
+			}
+		}
+	}
+
+	// No existing session — create a new one
+	createURL := fmt.Sprintf("%s/api/apps/%s/users/%s/sessions", m.adkURL, m.appName, userID)
+	resp2, err := m.httpClient.Post(createURL, "application/json", strings.NewReader("{}"))
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer resp2.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("create session HTTP %d: %s", resp.StatusCode, string(body))
+	body, _ := io.ReadAll(resp2.Body)
+	if resp2.StatusCode != 200 {
+		return "", fmt.Errorf("create session HTTP %d: %s", resp2.StatusCode, string(body))
 	}
 
 	var result map[string]any
