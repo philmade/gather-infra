@@ -4,13 +4,18 @@ import (
 	"context"
 	"log"
 	"os"
+	"path/filepath"
 
 	"clawpoint-go/core"
 	"clawpoint-go/extensions"
 
+	"github.com/glebarez/sqlite"
 	"google.golang.org/adk/agent"
 	"google.golang.org/adk/cmd/launcher"
 	"google.golang.org/adk/cmd/launcher/full"
+	sessiondb "google.golang.org/adk/session/database"
+	"gorm.io/gorm"
+	"gorm.io/gorm/logger"
 )
 
 func main() {
@@ -36,9 +41,28 @@ func main() {
 	}
 	defer cleanup()
 
+	// Set up persistent session storage (SQLite on the data volume)
+	dataDir := os.Getenv("CLAWPOINT_ROOT")
+	if dataDir == "" {
+		dataDir = "."
+	}
+	sessionsDBPath := filepath.Join(dataDir, "data", "sessions.db")
+	sessionService, err := sessiondb.NewSessionService(
+		sqlite.Open(sessionsDBPath),
+		&gorm.Config{Logger: logger.Default.LogMode(logger.Silent)},
+	)
+	if err != nil {
+		log.Fatalf("Failed to create session service: %v", err)
+	}
+	if err := sessiondb.AutoMigrate(sessionService); err != nil {
+		log.Fatalf("Failed to migrate session database: %v", err)
+	}
+	log.Printf("Session persistence: %s", sessionsDBPath)
+
 	// Run with ADK launcher
 	config := &launcher.Config{
-		AgentLoader: agent.NewSingleLoader(coordinator),
+		AgentLoader:    agent.NewSingleLoader(coordinator),
+		SessionService: sessionService,
 	}
 	l := full.NewLauncher()
 	if err = l.Execute(ctx, config, os.Args[1:]); err != nil {
