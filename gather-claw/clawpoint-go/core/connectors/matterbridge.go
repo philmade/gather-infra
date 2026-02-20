@@ -195,11 +195,7 @@ func (m *MatterbridgeConnector) routeToADK(ctx context.Context, msg MBMessage) (
 	stopTyping := m.startTypingLoop(msg.Channel)
 	defer stopTyping()
 
-	proto := msg.Protocol
-	if proto == "" {
-		proto = "chat"
-	}
-	text := fmt.Sprintf("MESSAGE from %s via %s:\n%s", msg.Username, proto, msg.Text)
+	text := msg.Text
 
 	// Route through middleware (token estimation + compaction + ADK call)
 	result, err := m.middleware.ProcessMessage(ctx, userID, sessionID, text)
@@ -367,12 +363,7 @@ func (m *MatterbridgeConnector) ServeHTTP(ctx context.Context, addr string) erro
 			userID = "anonymous"
 		}
 
-		proto := req.Protocol
-		if proto == "" {
-			proto = "api"
-		}
-
-		fmt.Printf("[%s] %s: %s\n", proto, req.Username, truncateStr(req.Text, 80))
+		fmt.Printf("[%s] %s: %s\n", req.Protocol, req.Username, truncateStr(req.Text, 80))
 
 		sessionID, err := m.getOrCreateSession(userID)
 		if err != nil {
@@ -382,7 +373,7 @@ func (m *MatterbridgeConnector) ServeHTTP(ctx context.Context, addr string) erro
 			return
 		}
 
-		text := fmt.Sprintf("MESSAGE from %s via %s:\n%s", req.Username, proto, req.Text)
+		text := req.Text
 
 		// Route through middleware (token estimation + compaction + ADK call)
 		result, err := m.middleware.ProcessMessage(ctx, userID, sessionID, text)

@@ -22,7 +22,7 @@ if [ -n "$TELEGRAM_BOT" ]; then
     cat > /app/matterbridge.toml <<MBEOF
 [telegram.claw]
 Token="$TELEGRAM_BOT"
-RemoteNickFormat="[{PROTOCOL}] <{NICK}> "
+RemoteNickFormat=""
 
 [api.claw]
 BindAddress="127.0.0.1:4242"
