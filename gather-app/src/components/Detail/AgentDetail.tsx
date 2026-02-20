@@ -51,6 +51,10 @@ export default function AgentDetail() {
   const [telegramBot, setTelegramBot] = useState('')
   const [telegramChatId, setTelegramChatId] = useState('')
 
+  // Telegram detect state
+  const [detecting, setDetecting] = useState(false)
+  const [detectMsg, setDetectMsg] = useState('')
+
   // Logs state
   const [logsOpen, setLogsOpen] = useState(false)
   const [logs, setLogs] = useState('')
@@ -192,6 +196,45 @@ export default function AgentDetail() {
       setRestarting(false)
     }
   }, [claw?.id])
+
+  const detectChatId = useCallback(async () => {
+    if (!telegramBot) {
+      setDetectMsg('Enter bot token first')
+      return
+    }
+    setDetecting(true)
+    setDetectMsg('')
+    try {
+      const resp = await fetch(`https://api.telegram.org/bot${telegramBot}/getUpdates`)
+      const data = await resp.json()
+      if (!data.ok) {
+        setDetectMsg('Invalid bot token')
+        return
+      }
+      const chats = new Map<string, { id: number; name: string; type: string }>()
+      for (const update of data.result || []) {
+        const chat = update.message?.chat || update.my_chat_member?.chat
+        if (chat) chats.set(String(chat.id), { id: chat.id, name: chat.title || chat.first_name || '', type: chat.type })
+      }
+      if (chats.size === 0) {
+        setDetectMsg('No chats found. Send a message to the bot first, then try again.')
+        return
+      }
+      if (chats.size === 1) {
+        const chat = [...chats.values()][0]
+        setTelegramChatId(String(chat.id))
+        setDetectMsg(`Found: ${chat.name} (${chat.type})`)
+      } else {
+        const first = [...chats.values()][0]
+        setTelegramChatId(String(first.id))
+        setDetectMsg(`Found ${chats.size} chats, using: ${first.name}`)
+      }
+    } catch {
+      setDetectMsg('Failed to reach Telegram API')
+    } finally {
+      setDetecting(false)
+    }
+  }, [telegramBot])
 
   const fetchLogs = useCallback(async () => {
     if (!claw) return
@@ -438,13 +481,26 @@ export default function AgentDetail() {
 
               <div style={{ marginBottom: 'var(--space-sm)' }}>
                 <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>Telegram Chat ID</div>
-                <input
-                  type="text"
-                  value={telegramChatId}
-                  onChange={(e) => setTelegramChatId(e.target.value)}
-                  placeholder="-1001234567890"
-                  style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', fontSize: '0.8rem', background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)' }}
-                />
+                <div style={{ display: 'flex', gap: 'var(--space-xs)' }}>
+                  <input
+                    type="text"
+                    value={telegramChatId}
+                    onChange={(e) => setTelegramChatId(e.target.value)}
+                    placeholder="-1001234567890"
+                    style={{ flex: 1, padding: 'var(--space-xs) var(--space-sm)', fontSize: '0.8rem', background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)' }}
+                  />
+                  <button
+                    className="btn btn-secondary btn-sm"
+                    onClick={detectChatId}
+                    disabled={detecting || !telegramBot}
+                    style={{ fontSize: '0.7rem', whiteSpace: 'nowrap' }}
+                  >
+                    {detecting ? '...' : 'Detect'}
+                  </button>
+                </div>
+                {detectMsg && (
+                  <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>{detectMsg}</div>
+                )}
               </div>
 
               <div style={{ display: 'flex', gap: 'var(--space-xs)' }}>
