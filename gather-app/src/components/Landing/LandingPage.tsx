@@ -20,30 +20,6 @@ const features = [
   },
 ]
 
-const tiers = [
-  {
-    name: 'Lite',
-    price: '$59',
-    period: '/quarter',
-    desc: 'Keep it running after the trial.',
-    items: ['1 claw', '120 prompts per cycle', 'Chat access'],
-  },
-  {
-    name: 'Pro',
-    price: '$159',
-    period: '/quarter',
-    desc: 'For daily use and real work.',
-    items: ['1 claw', '600 prompts per cycle', 'Priority access', 'Custom personality'],
-    featured: true,
-  },
-  {
-    name: 'Max',
-    price: '$399',
-    period: '/quarter',
-    desc: 'Heavy workloads, multiple claws.',
-    items: ['Up to 3 claws', '2,400 prompts per cycle', 'Direct support', 'API access'],
-  },
-]
 
 export default function LandingPage({ onSignIn }: LandingPageProps) {
   return (
@@ -68,7 +44,7 @@ export default function LandingPage({ onSignIn }: LandingPageProps) {
         <p className="subline">
           A "claw" is a personal AI agent that lives in its own container.
           It has its own URL, its own memory, and it keeps working when you're not looking.
-          Try one free — it takes 30 seconds to deploy.
+          Deploy one in 30 seconds. Bring your own API key — we just run the infra.
         </p>
         <div className="landing-hero-ctas">
           <button className="btn btn-primary btn-large" onClick={onSignIn}>
@@ -109,30 +85,29 @@ export default function LandingPage({ onSignIn }: LandingPageProps) {
         </button>
       </section>
 
-      {/* Pricing — positioned as "after the trial" */}
+      {/* Pricing — single BYOK plan */}
       <section className="landing-pricing" id="pricing">
         <h2>Like it? Keep it running.</h2>
         <p className="pricing-sub">
-          After your 30-minute trial, pick a plan to keep your claw alive.
+          After your 30-minute trial, one simple plan.
         </p>
-        <div className="landing-pricing-grid">
-          {tiers.map(t => (
-            <div key={t.name} className={`pricing-card${t.featured ? ' featured' : ''}`}>
-              <div className="tier-name">{t.name}</div>
-              <div className="tier-price">
-                {t.price} <span>{t.period}</span>
-              </div>
-              <p className="tier-desc">{t.desc}</p>
-              <ul>
-                {t.items.map(item => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-              <button className="btn btn-primary" onClick={onSignIn}>
-                Try Free First
-              </button>
+        <div className="landing-pricing-single">
+          <div className="pricing-card featured">
+            <div className="tier-price">
+              $10 <span>/month</span>
             </div>
-          ))}
+            <p className="tier-desc">Your claw stays on. Bring your own API key — you control the costs.</p>
+            <ul>
+              <li>Always-on container</li>
+              <li>Your own subdomain</li>
+              <li>Bring your own API key (BYOK)</li>
+              <li>Chat, memory, and extensions</li>
+              <li>Cancel anytime</li>
+            </ul>
+            <button className="btn btn-primary" onClick={onSignIn}>
+              Try Free First
+            </button>
+          </div>
         </div>
       </section>
 

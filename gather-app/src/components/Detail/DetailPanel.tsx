@@ -6,7 +6,7 @@ export default function DetailPanel() {
   const { state, dispatch } = useWorkspace()
   const isAgentView = state.detailView === 'agent-detail'
 
-  const title = isAgentView ? 'Agent' : 'Participants'
+  const title = isAgentView ? 'Claw Settings' : 'Participants'
 
   return (
     <aside className="detail-panel mobile-open">

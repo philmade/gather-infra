@@ -4,8 +4,11 @@ import ChannelList from './ChannelList'
 import DirectMessageList from './DirectMessageList'
 import ClawList from './ClawList'
 import UserInfo from './UserInfo'
+import { useWorkspace } from '../../context/WorkspaceContext'
 
 export default function Sidebar() {
+  const { dispatch } = useWorkspace()
+
   return (
     <aside className="sidebar">
       <WorkspaceHeader />
@@ -17,6 +20,11 @@ export default function Sidebar() {
         <ChannelList />
         <DirectMessageList />
         <ClawList />
+      </div>
+      <div className="sidebar-deploy">
+        <button className="sidebar-deploy-btn" onClick={() => dispatch({ type: 'OPEN_DEPLOY' })}>
+          + Deploy Claw
+        </button>
       </div>
       <UserInfo />
     </aside>

@@ -206,6 +206,31 @@ html, body {
     font-weight: 600;
 }
 
+/* Sidebar deploy button */
+
+.sidebar-deploy {
+    padding: var(--space-sm) var(--space-md);
+}
+
+.sidebar-deploy-btn {
+    width: 100%;
+    padding: 0.5rem;
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: var(--radius-xs);
+    font-family: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, box-shadow 0.15s;
+}
+
+.sidebar-deploy-btn:hover {
+    background: var(--accent-hover);
+    box-shadow: 0 0 12px rgba(168, 85, 247, 0.3);
+}
+
 /* Sidebar footer */
 
 .sidebar-footer {

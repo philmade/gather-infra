@@ -47,6 +47,7 @@ export default function ClawList() {
               dispatch({ type: 'SET_MODE', mode: 'workspace' })
               dispatch({ type: 'SET_CHANNEL', channel: topic })
               selectClawTopic(claw.id, claw.name)
+              dispatch({ type: 'SHOW_AGENT_DETAIL', agentId: claw.id })
             }}
           >
             <div className={`dm-avatar avatar-bg-${hashColor(claw.id)}`}>

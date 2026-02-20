@@ -159,10 +159,9 @@
   margin: 0 0 var(--space-2xl);
 }
 
-.landing-pricing-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: var(--space-lg);
+.landing-pricing-single {
+  max-width: 380px;
+  margin: 0 auto;
 }
 
 .pricing-card {
@@ -266,8 +265,7 @@
     font-size: 2rem;
   }
 
-  .landing-feature-grid,
-  .landing-pricing-grid {
+  .landing-feature-grid {
     grid-template-columns: 1fr;
   }
 

@@ -56,7 +56,7 @@ function reducer(state: WorkspaceState, action: WorkspaceAction): WorkspaceState
     case 'SHOW_PARTICIPANTS':
       return { ...state, detailView: 'participants', selectedAgent: null }
     case 'SHOW_AGENT_DETAIL':
-      return { ...state, detailView: 'agent-detail', selectedAgent: action.agentId }
+      return { ...state, detailView: 'agent-detail', selectedAgent: action.agentId, detailOpen: true }
     case 'TOGGLE_DETAIL':
       return { ...state, detailOpen: !state.detailOpen }
     case 'CLOSE_DETAIL':

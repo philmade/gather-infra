@@ -49,6 +49,15 @@ export default function ChannelHeader() {
         <div className="channel-topic">{topic}</div>
       </div>
       <div className="channel-actions">
+        {isClawTopic && (
+          <button
+            className="header-btn"
+            title="Claw Settings"
+            onClick={() => dispatch({ type: 'SHOW_AGENT_DETAIL', agentId: ch.replace('claw:', '') })}
+          >
+            {'\u2699\uFE0F'}
+          </button>
+        )}
         <span
           className="member-count"
           onClick={() => dispatch({ type: 'TOGGLE_DETAIL' })}
