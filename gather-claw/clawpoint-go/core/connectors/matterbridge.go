@@ -81,6 +81,12 @@ func (m *MatterbridgeConnector) Start(ctx context.Context) error {
 			response, err := m.routeToADK(ctx, msg)
 			if err != nil {
 				fmt.Printf("  error: %v\n", err)
+				// Send a friendly error message back instead of silent failure
+				if friendly := friendlyError(err); friendly != "" {
+					if sendErr := m.SendMessage(friendly); sendErr != nil {
+						fmt.Printf("  error reply failed: %v\n", sendErr)
+					}
+				}
 				continue
 			}
 
@@ -378,6 +384,13 @@ func (m *MatterbridgeConnector) ServeHTTP(ctx context.Context, addr string) erro
 		// Route through middleware (token estimation + compaction + ADK call)
 		result, err := m.middleware.ProcessMessage(ctx, userID, sessionID, text)
 		if err != nil {
+			fmt.Printf("  error: %v\n", err)
+			// Return friendly error as a normal message so the UI displays it
+			if friendly := friendlyError(err); friendly != "" {
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(BridgeResponse{Text: friendly})
+				return
+			}
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadGateway)
 			json.NewEncoder(w).Encode(BridgeResponse{Error: fmt.Sprintf("adk: %v", err)})
@@ -416,4 +429,40 @@ func truncateStr(s string, max int) string {
 		return s
 	}
 	return s[:max] + "..."
+}
+
+// friendlyError converts known ADK/LLM errors into user-facing messages.
+// Returns empty string if the error isn't recognized.
+func friendlyError(err error) string {
+	msg := err.Error()
+
+	// Rate limit (HTTP 429)
+	if strings.Contains(msg, "429") || strings.Contains(msg, "Limit Exhausted") || strings.Contains(msg, "rate_limit") {
+		// Try to extract reset time from the error
+		if idx := strings.Index(msg, "reset at "); idx != -1 {
+			resetTime := msg[idx+9:]
+			if end := strings.IndexAny(resetTime, "\"}"); end != -1 {
+				resetTime = resetTime[:end]
+			}
+			return fmt.Sprintf("I'm temporarily out of API credits — my limit resets at %s. Try again after that!", resetTime)
+		}
+		return "I'm temporarily out of API credits. My rate limit will reset soon — try again in a bit!"
+	}
+
+	// Connection refused / service down
+	if strings.Contains(msg, "connection refused") || strings.Contains(msg, "no such host") {
+		return "I'm having trouble reaching my brain (LLM service is down). Give me a minute to reconnect."
+	}
+
+	// Timeout
+	if strings.Contains(msg, "timeout") || strings.Contains(msg, "deadline exceeded") {
+		return "That took too long and timed out. Try sending a shorter message, or try again in a moment."
+	}
+
+	// Generic server error
+	if strings.Contains(msg, "500") || strings.Contains(msg, "502") || strings.Contains(msg, "503") {
+		return "Something went wrong on the backend. Try again in a moment."
+	}
+
+	return ""
 }
