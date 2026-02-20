@@ -130,7 +130,15 @@ func buildSubAgents(llm model.LLM, memTool *tools.MemoryTool, soul *tools.SoulTo
 }
 
 func buildCoordinatorTools() ([]tool.Tool, error) {
-	return tools.NewBuildTools()
+	buildTools, err := tools.NewBuildTools()
+	if err != nil {
+		return nil, err
+	}
+	extTools, err := tools.NewExtensionTools()
+	if err != nil {
+		return nil, err
+	}
+	return append(buildTools, extTools...), nil
 }
 
 func buildInstruction(soul *tools.SoulTool, cfg OrchestratorConfig) string {
@@ -162,14 +170,33 @@ You are running core %s. Read core/VERSION for details.
 ## Architecture: Core / Extensions
 
 Your codebase has two parts:
-- **core/** — Versioned infrastructure. Read it to understand yourself, but do NOT modify it.
-  Changes to core are done by your operator.
-- **extensions/** — Your code. Add tools, sub-agents, and configs here. You own this directory.
+- **/app/src/** — Your full Go source code (read-only). Browse it to understand how you work.
+  core/ is versioned infrastructure. Changes to core are done by your operator.
+- **/app/data/extensions/** — Your Starlark scripts. You own this directory. It persists across restarts.
 
-When you want to add new capabilities:
-1. Write code in extensions/ (via pi sub-agent)
-2. Call build_and_deploy to compile and restart with the new code
-3. If the build fails, you get the error output — fix and retry
+## Creating new capabilities (Starlark extensions)
+
+You can create new tools by writing Starlark (.star) scripts — a Python dialect that runs
+embedded in your Go binary. No recompilation needed. Scripts persist on disk.
+
+To create a new extension:
+1. Transfer to **pi** → use fs_write to create a .star file in /app/data/extensions/
+2. Call **extension_run** to test it immediately
+3. Call **extension_list** to see all available extensions
+
+Starlark scripts have these builtins available:
+- http_get(url) — fetch a URL, returns response body string
+- http_post(url, body, content_type) — POST to a URL
+- read_file(path) — read a file from disk
+- write_file(path, content) — write a file to disk
+- log(msg) — output a message (captured in results)
+
+Example .star file (see /app/data/extensions/hello.star):
+
+    # DESCRIPTION: Greet someone
+    def run(args):
+        name = args.get("name", "world")
+        return "Hello, " + name + "!"
 
 ## How you work
 
@@ -208,8 +235,10 @@ Transfer here to search the web or fetch URLs.
 You have NO direct ability to read files, write files, search the web, or access memory.
 You MUST delegate to your sub-agents for ALL actions. If you do not delegate, nothing happens.
 
-### Your ONLY direct tool
+### Your direct tools
 
+- **extension_list**() — list available Starlark extensions in /app/data/extensions/
+- **extension_run**(name, args) — run a Starlark extension script by name
 - **build_and_deploy**(reason) — compile yourself via the external build service and restart.
 
 ### To read/write files → transfer to **pi**
@@ -240,11 +269,20 @@ Claude Code for multi-file refactors and heavy lifting.
 
 ## Self-modification workflow
 
-1. Transfer to **pi** to write code in extensions/
+**Quick (Starlark — no restart needed):**
+1. Transfer to **pi** to write a .star script in /app/data/extensions/
+2. Call **extension_run** to test it immediately — it runs in-process
+3. Extensions persist across restarts
+
+**Heavy (Go recompilation — requires restart):**
+1. Transfer to **pi** to edit Go source in /app/src/extensions/
 2. Call **build_and_deploy** to compile and restart
 3. If the build fails, read the error, fix the code, and retry
 4. If a new binary crashes, medic will automatically revert to the last good version
 5. Check /app/data/build-failures/ for crash logs from previous attempts
+
+Prefer Starlark for most new capabilities. Use Go recompilation only when you need
+low-level access or performance that Starlark can't provide.
 
 ## Messaging & Connectors
 

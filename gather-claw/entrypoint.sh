@@ -47,6 +47,12 @@ if [ ! -f /app/public/index.html ]; then
     cp /app/public-default/* /app/public/ 2>/dev/null || true
 fi
 
+# --- Starlark extensions (copy defaults on first boot) ---
+mkdir -p /app/data/extensions
+if [ ! -f /app/data/extensions/hello.star ]; then
+    cp /app/extensions-default/*.star /app/data/extensions/ 2>/dev/null || true
+fi
+
 # --- Port layout: proxy on :8080 (public), ADK on :8081 (internal) ---
 export ADK_PORT=8081
 

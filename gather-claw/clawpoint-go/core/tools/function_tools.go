@@ -108,6 +108,20 @@ type BuildRequestResult struct {
 	Output  string `json:"output,omitempty"`
 }
 
+type ExtensionListArgs struct{}
+type ExtensionListResult struct {
+	Extensions []string `json:"extensions"`
+	Count      int      `json:"count"`
+}
+
+type ExtensionRunArgs struct {
+	Name string            `json:"name" jsonschema:"Extension script name (e.g. 'hello' or 'hello.star')"`
+	Args map[string]string `json:"args,omitempty" jsonschema:"Key-value arguments to pass to the script"`
+}
+type ExtensionRunResult struct {
+	Output string `json:"output"`
+}
+
 // Truncate is a shared utility for truncating strings.
 func Truncate(s string, max int) string {
 	if len(s) <= max {
@@ -373,6 +387,53 @@ func NewClaudeTools() ([]tool.Tool, error) {
 				return ClaudeCodeResult{}, err
 			}
 			return ClaudeCodeResult{Output: output}, nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, t)
+
+	return out, nil
+}
+
+// NewExtensionTools creates Starlark extension management tools for the coordinator.
+func NewExtensionTools() ([]tool.Tool, error) {
+	runner := NewStarlarkRunner()
+	var out []tool.Tool
+
+	t, err := functiontool.New(
+		functiontool.Config{
+			Name:        "extension_list",
+			Description: "List available Starlark extension scripts in /app/data/extensions/",
+		},
+		func(ctx tool.Context, args ExtensionListArgs) (ExtensionListResult, error) {
+			exts, err := runner.List()
+			if err != nil {
+				return ExtensionListResult{}, err
+			}
+			return ExtensionListResult{Extensions: exts, Count: len(exts)}, nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, t)
+
+	t, err = functiontool.New(
+		functiontool.Config{
+			Name:        "extension_run",
+			Description: "Run a Starlark (.star) extension script by name with optional arguments. Starlark is embedded Python — scripts can call http_get, read_file, write_file, and more.",
+		},
+		func(ctx tool.Context, args ExtensionRunArgs) (ExtensionRunResult, error) {
+			if args.Name == "" {
+				return ExtensionRunResult{}, fmt.Errorf("name is required")
+			}
+			output, err := runner.Run(args.Name, args.Args)
+			if err != nil {
+				return ExtensionRunResult{Output: err.Error()}, err
+			}
+			return ExtensionRunResult{Output: output}, nil
 		},
 	)
 	if err != nil {

@@ -26,6 +26,9 @@ COPY --from=builder /build/clawpoint-medic /app/
 COPY --from=builder /build/clawpoint-bridge /app/
 COPY --from=builder /build/clawpoint-proxy /app/
 
+# Full source code (agent can read to understand itself)
+COPY clawpoint-go/ /app/src/
+
 # Core version (readable by the agent at runtime)
 COPY clawpoint-go/core/VERSION /app/core-version
 
@@ -39,7 +42,10 @@ ENV CLAWPOINT_DB=/app/data/messages.db
 # Default public page template (copied to /app/public on first boot)
 COPY public/ /app/public-default/
 
-RUN mkdir -p /app/data /app/soul /app/public /app/builds /app/data/build-failures /var/log
+# Default Starlark extensions (copied to /app/data/extensions on first boot)
+COPY extensions-default/ /app/extensions-default/
+
+RUN mkdir -p /app/data /app/soul /app/public /app/builds /app/data/build-failures /app/data/extensions /var/log
 
 EXPOSE 8080
 
