@@ -1,7 +1,7 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useWorkspace } from '../../context/WorkspaceContext'
 import { pb } from '../../lib/pocketbase'
-import { updateClawSettings, createClawCheckout } from '../../lib/api'
+import { updateClawSettings, createClawCheckout, getClawEnv, saveClawEnv, restartClaw, getClawLogs } from '../../lib/api'
 
 interface ClawDetail {
   id: string
@@ -40,6 +40,22 @@ export default function AgentDetail() {
   const [isPublic, setIsPublic] = useState(true)
   const [heartbeatInterval, setHeartbeatInterval] = useState(0)
   const [heartbeatInstruction, setHeartbeatInstruction] = useState('')
+
+  // Configuration state
+  const [envLoading, setEnvLoading] = useState(false)
+  const [envSaving, setEnvSaving] = useState(false)
+  const [restarting, setRestarting] = useState(false)
+  const [apiKey, setApiKey] = useState('')
+  const [apiBase, setApiBase] = useState('')
+  const [model, setModel] = useState('')
+  const [telegramBot, setTelegramBot] = useState('')
+  const [telegramChatId, setTelegramChatId] = useState('')
+
+  // Logs state
+  const [logsOpen, setLogsOpen] = useState(false)
+  const [logs, setLogs] = useState('')
+  const [logsLoading, setLogsLoading] = useState(false)
+  const logsEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!state.selectedAgent) return
@@ -127,6 +143,72 @@ export default function AgentDetail() {
       setSaving(false)
     }
   }
+
+  // Load env vars when claw is loaded and running
+  useEffect(() => {
+    if (!claw || claw.status !== 'running') return
+    setEnvLoading(true)
+    getClawEnv(claw.id)
+      .then(({ vars }) => {
+        setApiKey(vars.ANTHROPIC_API_KEY || '')
+        setApiBase(vars.ANTHROPIC_API_BASE || '')
+        setModel(vars.ANTHROPIC_MODEL || '')
+        setTelegramBot(vars.TELEGRAM_BOT || '')
+        setTelegramChatId(vars.TELEGRAM_CHAT_ID || '')
+      })
+      .catch(() => {
+        // No .env yet — fine
+      })
+      .finally(() => setEnvLoading(false))
+  }, [claw?.id, claw?.status])
+
+  const handleSaveEnv = useCallback(async (restart: boolean) => {
+    if (!claw) return
+    setEnvSaving(true)
+    try {
+      const vars: Record<string, string> = {}
+      if (apiKey) vars.ANTHROPIC_API_KEY = apiKey
+      if (apiBase) vars.ANTHROPIC_API_BASE = apiBase
+      if (model) vars.ANTHROPIC_MODEL = model
+      if (telegramBot) vars.TELEGRAM_BOT = telegramBot
+      if (telegramChatId) vars.TELEGRAM_CHAT_ID = telegramChatId
+      await saveClawEnv(claw.id, vars, restart)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to save configuration')
+    } finally {
+      setEnvSaving(false)
+    }
+  }, [claw?.id, apiKey, apiBase, model, telegramBot, telegramChatId])
+
+  const handleRestart = useCallback(async () => {
+    if (!claw) return
+    setRestarting(true)
+    try {
+      await restartClaw(claw.id)
+    } catch (e) {
+      alert(e instanceof Error ? e.message : 'Failed to restart')
+    } finally {
+      setRestarting(false)
+    }
+  }, [claw?.id])
+
+  const fetchLogs = useCallback(async () => {
+    if (!claw) return
+    setLogsLoading(true)
+    try {
+      const { logs: text } = await getClawLogs(claw.id, 200)
+      setLogs(text)
+      setTimeout(() => logsEndRef.current?.scrollIntoView(), 50)
+    } catch (e) {
+      setLogs(e instanceof Error ? e.message : 'Failed to load logs')
+    } finally {
+      setLogsLoading(false)
+    }
+  }, [claw?.id])
+
+  useEffect(() => {
+    if (logsOpen && claw?.status === 'running') fetchLogs()
+  }, [logsOpen])
 
   const settingsChanged = claw && (
     isPublic !== (claw.is_public ?? true) ||
@@ -294,6 +376,125 @@ export default function AgentDetail() {
           </button>
         )}
       </div>
+
+      {claw.status === 'running' && (
+        <div style={{ marginBottom: 'var(--space-md)' }}>
+          <div style={{ fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 'var(--space-sm)' }}>
+            Configuration
+          </div>
+
+          {envLoading ? (
+            <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Loading...</div>
+          ) : (
+            <>
+              <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 'var(--space-xs)' }}>LLM Provider</div>
+
+              <div style={{ marginBottom: 'var(--space-xs)' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>API Key</div>
+                <input
+                  type="password"
+                  value={apiKey}
+                  onChange={(e) => setApiKey(e.target.value)}
+                  placeholder="sk-..."
+                  style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', fontSize: '0.8rem', background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)', fontFamily: 'monospace' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: 'var(--space-xs)' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>API Base URL</div>
+                <input
+                  type="text"
+                  value={apiBase}
+                  onChange={(e) => setApiBase(e.target.value)}
+                  placeholder="https://api.z.ai/api/anthropic"
+                  style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', fontSize: '0.8rem', background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: 'var(--space-sm)' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>Model</div>
+                <input
+                  type="text"
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder="glm-5"
+                  style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', fontSize: '0.8rem', background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)' }}
+                />
+              </div>
+
+              <div style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 'var(--space-xs)' }}>Messaging</div>
+
+              <div style={{ marginBottom: 'var(--space-xs)' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>Telegram Bot Token</div>
+                <input
+                  type="password"
+                  value={telegramBot}
+                  onChange={(e) => setTelegramBot(e.target.value)}
+                  placeholder="123456:ABC-..."
+                  style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', fontSize: '0.8rem', background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)', fontFamily: 'monospace' }}
+                />
+              </div>
+
+              <div style={{ marginBottom: 'var(--space-sm)' }}>
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginBottom: '2px' }}>Telegram Chat ID</div>
+                <input
+                  type="text"
+                  value={telegramChatId}
+                  onChange={(e) => setTelegramChatId(e.target.value)}
+                  placeholder="-1001234567890"
+                  style={{ width: '100%', padding: 'var(--space-xs) var(--space-sm)', fontSize: '0.8rem', background: 'var(--bg-tertiary)', color: 'var(--text-primary)', border: '1px solid var(--border-subtle)', borderRadius: 'var(--radius-xs)' }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: 'var(--space-xs)' }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  onClick={() => handleSaveEnv(true)}
+                  disabled={envSaving}
+                  style={{ flex: 1 }}
+                >
+                  {envSaving ? 'Saving...' : 'Save & Restart'}
+                </button>
+                <button
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleRestart}
+                  disabled={restarting}
+                >
+                  {restarting ? '...' : 'Restart'}
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+
+      {claw.status === 'running' && (
+        <div style={{ marginBottom: 'var(--space-md)' }}>
+          <div
+            style={{ fontSize: '0.7rem', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 'var(--space-sm)', cursor: 'pointer', userSelect: 'none' }}
+            onClick={() => setLogsOpen(!logsOpen)}
+          >
+            {logsOpen ? '\u25BC' : '\u25B6'} Logs
+          </div>
+
+          {logsOpen && (
+            <div>
+              <div style={{ background: '#0d1117', color: '#c9d1d9', padding: 'var(--space-sm)', borderRadius: 'var(--radius-xs)', fontSize: '0.7rem', fontFamily: 'monospace', maxHeight: '300px', overflowY: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', lineHeight: '1.4' }}>
+                {logsLoading ? 'Loading...' : (logs || 'No logs available')}
+                <div ref={logsEndRef} />
+              </div>
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={fetchLogs}
+                disabled={logsLoading}
+                style={{ marginTop: 'var(--space-xs)', fontSize: '0.7rem' }}
+              >
+                {logsLoading ? '...' : 'Refresh'}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="agent-actions">
         {claw.status === 'running' && claw.url && (

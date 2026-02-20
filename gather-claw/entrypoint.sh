@@ -2,6 +2,13 @@
 set -e
 cd /app
 
+# --- User-configured environment variables (from UI settings) ---
+if [ -f /app/data/.env ]; then
+    set -a
+    source /app/data/.env
+    set +a
+fi
+
 # --- Gather identity (if keys provided) ---
 if [ -n "$GATHER_PRIVATE_KEY" ]; then
     mkdir -p /root/.gather/keys

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"archive/tar"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -182,6 +184,58 @@ type SendClawMsgOutput struct {
 	Body struct {
 		Message       ClawMessage `json:"message"`
 		UserMessageID string      `json:"user_message_id"`
+	}
+}
+
+// Per-claw environment variable management
+
+type ClawEnvInput struct {
+	Authorization string `header:"Authorization" doc:"Bearer PocketBase auth token" required:"true"`
+	ID            string `path:"id" doc:"Deployment ID"`
+}
+
+type ClawEnvOutput struct {
+	Body struct {
+		Vars map[string]string `json:"vars"`
+	}
+}
+
+type SaveClawEnvInput struct {
+	Authorization string `header:"Authorization" doc:"Bearer PocketBase auth token" required:"true"`
+	ID            string `path:"id" doc:"Deployment ID"`
+	Body          struct {
+		Vars    map[string]string `json:"vars" doc:"Environment variable key-value pairs"`
+		Restart bool              `json:"restart,omitempty" doc:"Restart the container after saving"`
+	}
+}
+
+type SaveClawEnvOutput struct {
+	Body struct {
+		OK bool `json:"ok"`
+	}
+}
+
+type RestartClawInput struct {
+	Authorization string `header:"Authorization" doc:"Bearer PocketBase auth token" required:"true"`
+	ID            string `path:"id" doc:"Deployment ID"`
+}
+
+type RestartClawOutput struct {
+	Body struct {
+		OK bool `json:"ok"`
+	}
+}
+
+type ClawLogsInput struct {
+	Authorization string `header:"Authorization" doc:"Bearer PocketBase auth token" required:"true"`
+	ID            string `path:"id" doc:"Deployment ID"`
+	Tail          int    `query:"tail" default:"200" minimum:"1" maximum:"1000" doc:"Number of lines from end"`
+	Since         string `query:"since" doc:"Only logs after this timestamp (RFC3339)"`
+}
+
+type ClawLogsOutput struct {
+	Body struct {
+		Logs string `json:"logs"`
 	}
 }
 
@@ -583,8 +637,169 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 	})
 
 	// =========================================================================
-	// Vault endpoints — per-user secrets for claw env injection
+	// Per-claw environment configuration
 	// =========================================================================
+
+	// GET /api/claws/{id}/env — read current env vars
+	huma.Register(api, huma.Operation{
+		OperationID: "get-claw-env",
+		Method:      "GET",
+		Path:        "/api/claws/{id}/env",
+		Summary:     "Read claw environment variables",
+		Description: "Read the per-claw .env file. Sensitive values are masked.",
+		Tags:        []string{"Claws"},
+	}, func(ctx context.Context, input *ClawEnvInput) (*ClawEnvOutput, error) {
+		record, err := requireClawOwner(app, input.Authorization, input.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		containerID := record.GetString("container_id")
+		if containerID == "" {
+			return nil, huma.Error422UnprocessableEntity("Claw container not running")
+		}
+
+		vars, err := readClawEnv(ctx, containerID)
+		if err != nil {
+			// No .env yet — return empty
+			out := &ClawEnvOutput{}
+			out.Body.Vars = map[string]string{}
+			return out, nil
+		}
+
+		// Mask sensitive values
+		for k, v := range vars {
+			if isSensitiveKey(k) {
+				vars[k] = maskValue(v)
+			}
+		}
+
+		out := &ClawEnvOutput{}
+		out.Body.Vars = vars
+		return out, nil
+	})
+
+	// PUT /api/claws/{id}/env — save env vars
+	huma.Register(api, huma.Operation{
+		OperationID: "save-claw-env",
+		Method:      "PUT",
+		Path:        "/api/claws/{id}/env",
+		Summary:     "Save claw environment variables",
+		Description: "Write per-claw .env file. Only allowed keys are accepted. Optionally restarts the container.",
+		Tags:        []string{"Claws"},
+	}, func(ctx context.Context, input *SaveClawEnvInput) (*SaveClawEnvOutput, error) {
+		record, err := requireClawOwner(app, input.Authorization, input.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		containerID := record.GetString("container_id")
+		if containerID == "" {
+			return nil, huma.Error422UnprocessableEntity("Claw container not running")
+		}
+
+		// Validate keys against allowlist
+		for k := range input.Body.Vars {
+			if !allowedEnvKeys[k] {
+				return nil, huma.Error422UnprocessableEntity(fmt.Sprintf("Environment variable %q is not allowed", k))
+			}
+		}
+
+		if err := writeClawEnv(ctx, containerID, input.Body.Vars); err != nil {
+			return nil, huma.Error500InternalServerError(fmt.Sprintf("Failed to write .env: %v", err))
+		}
+
+		if input.Body.Restart {
+			if err := restartClawContainer(ctx, containerID); err != nil {
+				return nil, huma.Error500InternalServerError(fmt.Sprintf("Env saved but restart failed: %v", err))
+			}
+		}
+
+		out := &SaveClawEnvOutput{}
+		out.Body.OK = true
+		return out, nil
+	})
+
+	// POST /api/claws/{id}/restart — restart container
+	huma.Register(api, huma.Operation{
+		OperationID: "restart-claw",
+		Method:      "POST",
+		Path:        "/api/claws/{id}/restart",
+		Summary:     "Restart a Claw container",
+		Description: "Restart the Docker container for a claw. The entrypoint re-sources .env on startup.",
+		Tags:        []string{"Claws"},
+	}, func(ctx context.Context, input *RestartClawInput) (*RestartClawOutput, error) {
+		record, err := requireClawOwner(app, input.Authorization, input.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		containerID := record.GetString("container_id")
+		if containerID == "" {
+			return nil, huma.Error422UnprocessableEntity("Claw container not running")
+		}
+
+		if err := restartClawContainer(ctx, containerID); err != nil {
+			return nil, huma.Error500InternalServerError(fmt.Sprintf("Restart failed: %v", err))
+		}
+
+		out := &RestartClawOutput{}
+		out.Body.OK = true
+		return out, nil
+	})
+
+	// GET /api/claws/{id}/logs — read container logs
+	huma.Register(api, huma.Operation{
+		OperationID: "get-claw-logs",
+		Method:      "GET",
+		Path:        "/api/claws/{id}/logs",
+		Summary:     "Read claw container logs",
+		Description: "Read Docker container logs for a claw. Returns the last N lines.",
+		Tags:        []string{"Claws"},
+	}, func(ctx context.Context, input *ClawLogsInput) (*ClawLogsOutput, error) {
+		record, err := requireClawOwner(app, input.Authorization, input.ID)
+		if err != nil {
+			return nil, err
+		}
+
+		containerID := record.GetString("container_id")
+		if containerID == "" {
+			return nil, huma.Error422UnprocessableEntity("Claw container not running")
+		}
+
+		cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
+		if err != nil {
+			return nil, huma.Error500InternalServerError("Docker connection failed")
+		}
+		defer cli.Close()
+
+		opts := container.LogsOptions{
+			ShowStdout: true,
+			ShowStderr: true,
+			Tail:       fmt.Sprintf("%d", input.Tail),
+		}
+		if input.Since != "" {
+			opts.Since = input.Since
+		}
+
+		reader, err := cli.ContainerLogs(ctx, containerID, opts)
+		if err != nil {
+			return nil, huma.Error500InternalServerError(fmt.Sprintf("Failed to read logs: %v", err))
+		}
+		defer reader.Close()
+
+		raw, err := io.ReadAll(reader)
+		if err != nil {
+			return nil, huma.Error500InternalServerError("Failed to read log stream")
+		}
+
+		// Docker multiplexed stream: strip 8-byte header from each frame
+		logs := stripDockerLogHeaders(raw)
+
+		out := &ClawLogsOutput{}
+		out.Body.Logs = logs
+		return out, nil
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -709,4 +924,183 @@ func resolveAuthorName(app *pocketbase.PocketBase, authorID string) string {
 		return "You"
 	}
 	return agentName(app, authorID)
+}
+
+// ---------------------------------------------------------------------------
+// Per-claw env helpers
+// ---------------------------------------------------------------------------
+
+// allowedEnvKeys is the allowlist of env vars users can set via the UI.
+// System vars (GATHER_PRIVATE_KEY, CLAWPOINT_ROOT, etc.) are excluded.
+var allowedEnvKeys = map[string]bool{
+	"MODEL_PROVIDER":     true,
+	"ANTHROPIC_API_KEY":  true,
+	"ANTHROPIC_API_BASE": true,
+	"ANTHROPIC_MODEL":    true,
+	"TELEGRAM_BOT":       true,
+	"TELEGRAM_CHAT_ID":   true,
+}
+
+// requireClawOwner validates auth + ownership and returns the claw record.
+func requireClawOwner(app *pocketbase.PocketBase, authHeader, clawID string) (*core.Record, error) {
+	userID, err := extractPBUserID(app, authHeader)
+	if err != nil {
+		return nil, huma.Error401Unauthorized("Authentication required")
+	}
+
+	record, err := app.FindRecordById("claw_deployments", clawID)
+	if err != nil {
+		return nil, huma.Error404NotFound("Deployment not found")
+	}
+
+	if record.GetString("user_id") != userID {
+		return nil, huma.Error404NotFound("Deployment not found")
+	}
+
+	return record, nil
+}
+
+// isSensitiveKey returns true for keys whose values should be masked in API responses.
+func isSensitiveKey(key string) bool {
+	upper := strings.ToUpper(key)
+	return strings.Contains(upper, "KEY") ||
+		strings.Contains(upper, "TOKEN") ||
+		strings.Contains(upper, "SECRET")
+}
+
+// maskValue shows first 4 and last 4 chars, masking the rest.
+func maskValue(v string) string {
+	if len(v) <= 8 {
+		return "****"
+	}
+	return v[:4] + strings.Repeat("*", len(v)-8) + v[len(v)-4:]
+}
+
+// readClawEnv reads /app/data/.env from a running container via docker exec.
+func readClawEnv(ctx context.Context, containerID string) (map[string]string, error) {
+	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
+	if err != nil {
+		return nil, err
+	}
+	defer cli.Close()
+
+	execCfg := container.ExecOptions{
+		Cmd:          []string{"cat", "/app/data/.env"},
+		AttachStdout: true,
+		AttachStderr: true,
+	}
+	execID, err := cli.ContainerExecCreate(ctx, containerID, execCfg)
+	if err != nil {
+		return nil, err
+	}
+
+	resp, err := cli.ContainerExecAttach(ctx, execID.ID, container.ExecAttachOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Close()
+
+	raw, err := io.ReadAll(resp.Reader)
+	if err != nil {
+		return nil, err
+	}
+
+	// Strip Docker multiplexed stream headers
+	content := stripDockerLogHeaders(raw)
+
+	return parseEnvFile(content), nil
+}
+
+// writeClawEnv writes a .env file to the container's /app/data/ via CopyToContainer.
+func writeClawEnv(ctx context.Context, containerID string, vars map[string]string) error {
+	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
+	if err != nil {
+		return err
+	}
+	defer cli.Close()
+
+	// Build .env content with sorted keys for deterministic output
+	keys := make([]string, 0, len(vars))
+	for k := range vars {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	var buf bytes.Buffer
+	for _, k := range keys {
+		v := vars[k]
+		if v == "" {
+			continue
+		}
+		fmt.Fprintf(&buf, "%s=%s\n", k, v)
+	}
+	envContent := buf.Bytes()
+
+	// Create a tar archive containing the .env file
+	var tarBuf bytes.Buffer
+	tw := tar.NewWriter(&tarBuf)
+	if err := tw.WriteHeader(&tar.Header{
+		Name: ".env",
+		Mode: 0644,
+		Size: int64(len(envContent)),
+	}); err != nil {
+		return err
+	}
+	if _, err := tw.Write(envContent); err != nil {
+		return err
+	}
+	if err := tw.Close(); err != nil {
+		return err
+	}
+
+	return cli.CopyToContainer(ctx, containerID, "/app/data/", &tarBuf, container.CopyToContainerOptions{})
+}
+
+// restartClawContainer restarts a Docker container with a 10-second timeout.
+func restartClawContainer(ctx context.Context, containerID string) error {
+	cli, err := dockerclient.NewClientWithOpts(dockerclient.FromEnv, dockerclient.WithAPIVersionNegotiation())
+	if err != nil {
+		return err
+	}
+	defer cli.Close()
+
+	timeout := 10
+	return cli.ContainerRestart(ctx, containerID, container.StopOptions{Timeout: &timeout})
+}
+
+// parseEnvFile parses KEY=VALUE lines from a .env file string.
+func parseEnvFile(content string) map[string]string {
+	vars := map[string]string{}
+	for _, line := range strings.Split(content, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		idx := strings.IndexByte(line, '=')
+		if idx <= 0 {
+			continue
+		}
+		vars[line[:idx]] = line[idx+1:]
+	}
+	return vars
+}
+
+// stripDockerLogHeaders removes Docker multiplexed stream 8-byte frame headers.
+func stripDockerLogHeaders(raw []byte) string {
+	var out bytes.Buffer
+	for len(raw) >= 8 {
+		// Header: [stream_type(1), 0, 0, 0, size(4 big-endian)]
+		size := int(raw[4])<<24 | int(raw[5])<<16 | int(raw[6])<<8 | int(raw[7])
+		raw = raw[8:]
+		if size > len(raw) {
+			size = len(raw)
+		}
+		out.Write(raw[:size])
+		raw = raw[size:]
+	}
+	// If there's leftover data without a proper header, include it as-is
+	if len(raw) > 0 {
+		out.Write(raw)
+	}
+	return out.String()
 }

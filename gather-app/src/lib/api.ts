@@ -144,6 +144,26 @@ export function sendClawMessage(clawId: string, body: string) {
   return apiPost<{ message: ClawMessage; user_message_id: string }>(`/api/claws/${encodeURIComponent(clawId)}/messages`, { body })
 }
 
+// Claw environment / config
+export function getClawEnv(id: string) {
+  return apiFetch<{ vars: Record<string, string> }>(`/api/claws/${encodeURIComponent(id)}/env`)
+}
+
+export function saveClawEnv(id: string, vars: Record<string, string>, restart = false) {
+  return apiFetch<{ ok: boolean }>(`/api/claws/${encodeURIComponent(id)}/env`, {
+    method: 'PUT',
+    body: JSON.stringify({ vars, restart }),
+  })
+}
+
+export function restartClaw(id: string) {
+  return apiFetch<{ ok: boolean }>(`/api/claws/${encodeURIComponent(id)}/restart`, { method: 'POST' })
+}
+
+export function getClawLogs(id: string, tail = 200) {
+  return apiFetch<{ logs: string }>(`/api/claws/${encodeURIComponent(id)}/logs?tail=${tail}`)
+}
+
 // Stripe checkout
 export function createClawCheckout(id: string): Promise<{ url: string }> {
   return apiFetch(`/api/claws/${encodeURIComponent(id)}/checkout`, { method: 'POST' })
