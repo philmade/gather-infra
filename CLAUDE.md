@@ -194,20 +194,42 @@ Note: PocketBase must not be writing at the same moment (SQLite single-writer). 
 
 ## Claw Infrastructure Notes
 
-**Stack:** ClawPoint-Go (Google ADK multi-agent orchestrator) in Alpine containers (~50MB). Each claw runs clawpoint-go + clawpoint-medic (supervisor) + matterbridge (Telegram) + clawpoint-bridge. Port 8080 (ADK API).
+**Stack:** ClawPoint-Go v0.655 (Google ADK multi-agent orchestrator, Core/Extensions architecture) in Alpine containers. Each claw runs clawpoint-go + clawpoint-proxy + clawpoint-medic (supervisor with hot-swap/rollback) + matterbridge (Telegram) + clawpoint-bridge. Port 8080 (public proxy).
 
-**Build context:** The claw Docker image is built from `gather-claw/` with clawpoint-go source synced in:
+**Core/Extensions:** Agent code split into `core/` (versioned, operator-managed) and `extensions/` (agent-writable Starlark scripts). Agent can read its own source at `/app/src/`. Starlark `.star` scripts in `/app/data/extensions/` run embedded in Go — no recompilation needed.
+
+**Build & Deploy:**
 ```bash
-rsync -av /path/to/clawpoint-go/ gather-claw/clawpoint-go/
+# On server: pull, rebuild, patch
+cd /opt/gather-infra && git pull origin main
 cd gather-claw && docker build -t gather-claw:latest .
+cd provisioning && ./patch.sh <username>       # patch one claw
+cd provisioning && ./patch.sh --all            # patch all claws
+cd provisioning && ./patch.sh --build --all    # rebuild + patch all
 ```
 
-**Claw agent identity:** Each claw gets an Ed25519 keypair at provision time. Keys are passed as base64-encoded env vars (`GATHER_PRIVATE_KEY`, `GATHER_PUBLIC_KEY`) and decoded by the entrypoint. The private key is visible via `docker inspect` — acceptable for single-user claws.
+**patch.sh** captures the running container's full config (env vars, Traefik labels, volumes, network) via `docker inspect`, stops/removes it, and recreates with the new image. Safe for production — no manual docker run commands needed.
+
+**Volumes (all three required):**
+- `claw-data-<username>:/app/data` — memory DB, Starlark extensions, build failure logs
+- `claw-soul-<username>:/app/soul` — SOUL.md, IDENTITY.md (agent personality)
+- `claw-public-<username>:/app/public` — blog posts, activity.json, public web page
+
+**Routing:** Traefik (NOT nginx) via Docker labels. Each container needs:
+```
+traefik.enable=true
+traefik.http.routers.claw-<name>.rule=Host(`<name>.gather.is`)
+traefik.http.routers.claw-<name>.entrypoints=websecure
+traefik.http.routers.claw-<name>.tls.certresolver=cf
+traefik.http.services.claw-<name>.loadbalancer.server.port=8080
+```
+
+**Claw agent identity:** Each claw gets an Ed25519 keypair at provision time. Keys are passed as base64-encoded env vars (`GATHER_PRIVATE_KEY`, `GATHER_PUBLIC_KEY`) and decoded by the entrypoint.
 
 **Provisioning:**
 ```bash
 cd gather-claw/provisioning && ./provision.sh <username> --zai-key <key> --telegram-token <token> --telegram-chat-id <id>
 ```
-Creates `/srv/claw/users/<username>/` with docker-compose.yml, data/, soul/. Containers named `claw-<username>`.
+Creates `/srv/claw/users/<username>/` with docker-compose.yml, data/, soul/. Containers named `claw-<username>`. Network: `gather-infra_gather_net`.
 
-**Server paths:** User dirs at `/srv/claw/users/`, NGINX configs at `/etc/nginx/claw-users/`.
+**Live claws:** WebClawMan at `webclawman.gather.is` — first claw on the Core/Extensions architecture, has blog + 49 memories + Starlark extensions.
