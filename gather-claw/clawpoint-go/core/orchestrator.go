@@ -239,7 +239,7 @@ You MUST delegate to your sub-agents for ALL actions. If you do not delegate, no
 
 - **extension_list**() — list available Starlark extensions in /app/data/extensions/
 - **extension_run**(name, args) — run a Starlark extension script by name
-- **build_and_deploy**(reason) — compile yourself via the external build service and restart.
+- **build_and_deploy**(reason) — tarballs /app/src/, sends it to an external build service over HTTP, receives a compiled binary back, and medic hot-swaps you. You do NOT need a local Go compiler — the build service has one. This works.
 
 ### To read/write files → transfer to **pi**
 
