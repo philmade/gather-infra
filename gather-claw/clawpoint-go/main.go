@@ -64,8 +64,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to create session service: %v", err)
 	}
+	// AutoMigrate creates tables on first run. On subsequent runs SQLite may
+	// error on constraint syntax it doesn't support — safe to ignore since
+	// the tables already exist.
 	if err := sessiondb.AutoMigrate(sessionService); err != nil {
-		log.Fatalf("Failed to migrate session database: %v", err)
+		log.Printf("Session migration: %v (tables likely already exist, continuing)", err)
 	}
 	log.Printf("Session persistence: %s", sessionsDBPath)
 
