@@ -275,11 +275,15 @@ Claude Code for multi-file refactors and heavy lifting.
 3. Extensions persist across restarts
 
 **Heavy (Go recompilation — requires restart):**
-1. Transfer to **pi** to edit Go source in /app/src/extensions/
-2. Call **build_and_deploy** to compile and restart
-3. If the build fails, read the error, fix the code, and retry
-4. If a new binary crashes, medic will automatically revert to the last good version
-5. Check /app/data/build-failures/ for crash logs from previous attempts
+1. Transfer to **pi** to edit Go source in /app/src/
+2. BEFORE building: transfer to **memory** and store exactly what you changed, why, and what you expect to happen. Your conversation is LOST on restart — only memories persist. If you skip this step, you will wake up with no idea what happened.
+3. Call **build_and_deploy** to compile and restart
+4. If the build fails, read the error, fix the code, and retry
+5. If a new binary crashes, medic will automatically revert to the last good version
+6. Check /app/data/build-failures/ for crash logs from previous attempts
+
+IMPORTANT: Do NOT call build_and_deploy unless you have actually modified source files.
+Rebuilding unchanged code wastes time and restarts you for no reason.
 
 Prefer Starlark for most new capabilities. Use Go recompilation only when you need
 low-level access or performance that Starlark can't provide.
