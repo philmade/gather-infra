@@ -1,16 +1,22 @@
-// clawpoint-buildservice — external Go build service for claw agents.
+// clawpoint-buildservice — external Go compilation service for claw agents.
 //
-// Compiles clawpoint-go source and writes the binary to a shared volume.
-// The claw's medic process detects the new binary and performs a hot swap.
+// Receives a tarball of Go source, compiles it, and returns the binary.
+// Stateless: no shared volumes needed. One HTTP round-trip per build.
+//
+// Flow:
+//   POST /build (body: tar.gz of source) →
+//     Success: 200 + binary as application/octet-stream
+//     Failure: 400 + JSON error with compilation output
 //
 // Build: cd clawpoint-go && go build -o clawpoint-buildservice ./cmd/buildservice
-// Usage: BUILD_SRC=/src BUILD_OUT=/builds ./clawpoint-buildservice
+// Usage: BUILD_ADDR=:9090 ./clawpoint-buildservice
 
 package main
 
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -20,25 +26,17 @@ import (
 )
 
 var (
-	buildMu   sync.Mutex
-	srcDir    string
-	outDir    string
+	buildMu    sync.Mutex
 	listenAddr string
 )
 
-type buildRequest struct {
-	Reason string `json:"reason"`
-}
-
-type buildResponse struct {
+type errorResponse struct {
 	Success bool   `json:"success"`
 	Output  string `json:"output"`
 	Error   string `json:"error,omitempty"`
 }
 
 func init() {
-	srcDir = getEnv("BUILD_SRC", "/src")
-	outDir = getEnv("BUILD_OUT", "/builds")
 	listenAddr = getEnv("BUILD_ADDR", ":9090")
 }
 
@@ -48,10 +46,11 @@ func handleBuild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Only one build at a time
+	// One build at a time
 	if !buildMu.TryLock() {
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
-		json.NewEncoder(w).Encode(buildResponse{
+		json.NewEncoder(w).Encode(errorResponse{
 			Success: false,
 			Error:   "Build already in progress. Wait and retry.",
 		})
@@ -59,54 +58,84 @@ func handleBuild(w http.ResponseWriter, r *http.Request) {
 	}
 	defer buildMu.Unlock()
 
-	var req buildRequest
-	json.NewDecoder(r.Body).Decode(&req)
+	log.Printf("Build request received (%d bytes)", r.ContentLength)
 
-	log.Printf("Build requested: %s", req.Reason)
+	// 1. Create temp directory for this build
+	tmpDir, err := os.MkdirTemp("", "claw-build-*")
+	if err != nil {
+		sendError(w, "Failed to create temp dir", err.Error())
+		return
+	}
+	defer os.RemoveAll(tmpDir)
 
-	// Run go build with a timeout
-	outPath := outDir + "/clawpoint-go.new"
-	cmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", outPath, ".")
+	srcDir := tmpDir + "/src"
+	os.MkdirAll(srcDir, 0755)
+
+	// 2. Unpack tarball from request body
+	untar := exec.Command("tar", "-xzf", "-", "-C", srcDir)
+	untar.Stdin = r.Body
+	if out, err := untar.CombinedOutput(); err != nil {
+		sendError(w, "Failed to unpack tarball", fmt.Sprintf("%v: %s", err, string(out)))
+		return
+	}
+
+	log.Printf("Source unpacked to %s", srcDir)
+
+	// 3. Compile
+	binaryPath := tmpDir + "/clawpoint-go"
+	cmd := exec.Command("go", "build", "-ldflags=-s -w", "-o", binaryPath, ".")
 	cmd.Dir = srcDir
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux")
 
-	done := make(chan error, 1)
-	var output []byte
+	done := make(chan struct{})
+	var buildOutput []byte
+	var buildErr error
 
 	go func() {
-		var err error
-		output, err = cmd.CombinedOutput()
-		done <- err
+		buildOutput, buildErr = cmd.CombinedOutput()
+		close(done)
 	}()
 
 	select {
-	case err := <-done:
-		w.Header().Set("Content-Type", "application/json")
-
-		if err != nil {
-			log.Printf("Build failed: %v", err)
-			json.NewEncoder(w).Encode(buildResponse{
-				Success: false,
-				Output:  string(output),
-				Error:   fmt.Sprintf("Build failed: %v", err),
-			})
-			return
-		}
-
-		log.Printf("Build succeeded: %s", outPath)
-		json.NewEncoder(w).Encode(buildResponse{
-			Success: true,
-			Output:  string(output),
-		})
-
+	case <-done:
+		// Build finished
 	case <-time.After(120 * time.Second):
 		cmd.Process.Kill()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(buildResponse{
-			Success: false,
-			Error:   "Build timed out after 120s",
-		})
+		sendError(w, "Build timed out after 120s", "")
+		return
 	}
+
+	if buildErr != nil {
+		log.Printf("Build failed: %v", buildErr)
+		sendError(w, fmt.Sprintf("Compilation failed: %v", buildErr), string(buildOutput))
+		return
+	}
+
+	// 4. Return the compiled binary
+	binary, err := os.Open(binaryPath)
+	if err != nil {
+		sendError(w, "Build succeeded but binary unreadable", err.Error())
+		return
+	}
+	defer binary.Close()
+
+	info, _ := binary.Stat()
+	log.Printf("Build succeeded: %d bytes", info.Size())
+
+	w.Header().Set("Content-Type", "application/octet-stream")
+	w.Header().Set("X-Build-Output", "compilation successful")
+	w.Header().Set("Content-Length", fmt.Sprintf("%d", info.Size()))
+	io.Copy(w, binary)
+}
+
+func sendError(w http.ResponseWriter, msg, output string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusBadRequest)
+	json.NewEncoder(w).Encode(errorResponse{
+		Success: false,
+		Output:  output,
+		Error:   msg,
+	})
 }
 
 func handleHealth(w http.ResponseWriter, r *http.Request) {
@@ -116,11 +145,6 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	log.Printf("Build service starting on %s", listenAddr)
-	log.Printf("  Source: %s", srcDir)
-	log.Printf("  Output: %s", outDir)
-
-	// Ensure output dir exists
-	os.MkdirAll(outDir, 0755)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/build", handleBuild)
@@ -129,8 +153,8 @@ func main() {
 	server := &http.Server{
 		Addr:         listenAddr,
 		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 130 * time.Second, // Must exceed build timeout
+		ReadTimeout:  130 * time.Second, // Must handle large tarballs
+		WriteTimeout: 130 * time.Second, // Must handle large binaries
 	}
 
 	if err := server.ListenAndServe(); err != nil {
