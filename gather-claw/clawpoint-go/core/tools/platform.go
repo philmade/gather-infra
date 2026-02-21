@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 )
 
@@ -84,12 +85,12 @@ func NewPlatformTool() *PlatformTool {
 
 // Search finds platform tools matching a query.
 func (p *PlatformTool) Search(query, category string) (string, error) {
-	url := p.mcpURL + "/tools/search?q=" + query
+	u := p.mcpURL + "/tools/search?q=" + url.QueryEscape(query)
 	if category != "" {
-		url += "&category=" + category
+		u += "&category=" + url.QueryEscape(category)
 	}
 
-	resp, err := p.client.Get(url)
+	resp, err := p.client.Get(u)
 	if err != nil {
 		return "", fmt.Errorf("search request: %w", err)
 	}
