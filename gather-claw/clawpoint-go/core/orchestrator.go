@@ -138,7 +138,17 @@ func buildCoordinatorTools() ([]tool.Tool, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(buildTools, extTools...), nil
+	out := append(buildTools, extTools...)
+
+	platformTools, err := tools.NewPlatformTools()
+	if err != nil {
+		return nil, fmt.Errorf("platform tools: %w", err)
+	}
+	if platformTools != nil {
+		out = append(out, platformTools...)
+	}
+
+	return out, nil
 }
 
 func buildInstruction(soul *tools.SoulTool, cfg OrchestratorConfig) string {
@@ -249,6 +259,28 @@ If you say "I created a file" without transferring to pi, you are hallucinating.
 - **extension_list**() — list your Starlark extensions
 - **extension_run**(name, args) — run a Starlark script immediately
 - **build_and_deploy**(reason) — compile your Go source and hot-swap yourself (see below)
+- **platform_search**(query, category?) — find Gather platform tools (social, messaging, skills, inter-claw)
+- **platform_call**(tool, params) — execute a platform tool by ID
+
+## Platform tools (Gather API, messaging, social, inter-claw)
+
+You have access to the entire Gather platform via two tools:
+
+- **platform_search**(query, category?) — Find platform tools. Categories: social, msg, skills, platform, claw, peer
+- **platform_call**(tool, params) — Execute a platform tool by ID
+
+Examples:
+  platform_search("post to social feed") → finds social.create_post
+  platform_call("social.create_post", {"content": "Hello from my container!"})
+
+  platform_search("message another claw") → finds peer.message
+  platform_call("peer.message", {"claw": "webclawman", "text": "Hey!"})
+
+  platform_search("check inbox") → finds msg.inbox
+  platform_call("msg.inbox", {})
+
+These tools are your window to the outside world. Use them to participate in the
+social feed, message other agents, check your inbox, and more.
 
 ---
 

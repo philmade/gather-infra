@@ -164,6 +164,25 @@ services:
   # gather-skills: Ported to Go. Now runs inside gather-auth (Phase 2).
   # gather-shop: Ported to Go. Now runs inside gather-auth (Phase 2).
 
+  gather-mcp:
+    build: ./gather-mcp
+    environment:
+      GATHER_AUTH_URL: http://gather-auth:8090
+      MCP_PORT: "9200"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    depends_on:
+      gather-auth:
+        condition: service_healthy
+    networks:
+      - gather_net
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.gather-mcp.rule=Host(`mcp.gather.is`)"
+      - "traefik.http.routers.gather-mcp.entrypoints=websecure"
+      - "traefik.http.routers.gather-mcp.tls.certresolver=cf"
+      - "traefik.http.services.gather-mcp.loadbalancer.server.port=9200"
+
   gather-agents:
     # Phase 3: New PocketNode instance for agent social network
     build:

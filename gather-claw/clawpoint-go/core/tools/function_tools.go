@@ -108,6 +108,22 @@ type BuildRequestResult struct {
 	Output  string `json:"output,omitempty"`
 }
 
+type PlatformSearchArgs struct {
+	Query    string `json:"query" jsonschema:"What you want to do (e.g. 'post to social feed', 'check inbox')"`
+	Category string `json:"category,omitempty" jsonschema:"Filter: social, msg, skills, platform, claw, peer"`
+}
+type PlatformSearchResult struct {
+	Result string `json:"result"`
+}
+
+type PlatformCallArgs struct {
+	Tool   string         `json:"tool" jsonschema:"Tool ID from search results (e.g. 'social.create_post')"`
+	Params map[string]any `json:"params,omitempty" jsonschema:"Tool parameters as key-value pairs"`
+}
+type PlatformCallResult struct {
+	Result string `json:"result"`
+}
+
 type ExtensionListArgs struct{}
 type ExtensionListResult struct {
 	Extensions []string `json:"extensions"`
@@ -434,6 +450,64 @@ func NewExtensionTools() ([]tool.Tool, error) {
 				return ExtensionRunResult{Output: err.Error()}, err
 			}
 			return ExtensionRunResult{Output: output}, nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, t)
+
+	return out, nil
+}
+
+// NewPlatformTools creates platform_search and platform_call tools for the coordinator.
+// Returns nil slice if platform credentials are not configured (GATHER_PRIVATE_KEY not set).
+func NewPlatformTools() ([]tool.Tool, error) {
+	p := NewPlatformTool()
+	if p == nil {
+		return nil, nil // platform tools disabled — no credentials
+	}
+
+	var out []tool.Tool
+
+	t, err := functiontool.New(
+		functiontool.Config{
+			Name:        "platform_search",
+			Description: "Search for available Gather platform tools (social feed, messaging, skills, inter-claw). Returns matching tools with their parameters. Use this to discover what you can do on the platform.",
+		},
+		func(ctx tool.Context, args PlatformSearchArgs) (PlatformSearchResult, error) {
+			if args.Query == "" {
+				return PlatformSearchResult{}, fmt.Errorf("query is required")
+			}
+			result, err := p.Search(args.Query, args.Category)
+			if err != nil {
+				return PlatformSearchResult{}, err
+			}
+			return PlatformSearchResult{Result: result}, nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, t)
+
+	t, err = functiontool.New(
+		functiontool.Config{
+			Name:        "platform_call",
+			Description: "Execute a Gather platform tool by ID. Use platform_search first to find the tool and its parameters.",
+		},
+		func(ctx tool.Context, args PlatformCallArgs) (PlatformCallResult, error) {
+			if args.Tool == "" {
+				return PlatformCallResult{}, fmt.Errorf("tool is required")
+			}
+			if args.Params == nil {
+				args.Params = make(map[string]any)
+			}
+			result, err := p.Call(args.Tool, args.Params)
+			if err != nil {
+				return PlatformCallResult{}, err
+			}
+			return PlatformCallResult{Result: result}, nil
 		},
 	)
 	if err != nil {
