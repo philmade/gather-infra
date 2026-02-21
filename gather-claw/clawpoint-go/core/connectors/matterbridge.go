@@ -221,8 +221,8 @@ func (m *MatterbridgeConnector) routeToADK(ctx context.Context, msg MBMessage) (
 }
 
 // getOrCreateSession finds the most recent existing session for this user,
-// or creates a new one if none exist. Sessions persist in SQLite across restarts,
-// so the agent maintains full conversation history within a session.
+// or creates a new one if none exist. Sessions are in-memory — on restart,
+// a new session is created and heartbeat injection restores continuity.
 func (m *MatterbridgeConnector) getOrCreateSession(userID string) (string, error) {
 	m.mu.Lock()
 	if sid, ok := m.sessions[userID]; ok {

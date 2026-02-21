@@ -23,8 +23,6 @@ type Middleware struct {
 	appName    string
 	httpClient *http.Client
 
-	// Paths to SQLite databases (read-only for estimation, write for memories)
-	sessionsDBPath string // ADK session events
 	messagesDBPath string // Agent memory (messages.db)
 
 	// LLM config for compaction summarization
@@ -36,11 +34,6 @@ type Middleware struct {
 // NewMiddleware creates a middleware instance.
 // It reads configuration from environment variables.
 func NewMiddleware(adkURL string) *Middleware {
-	root := os.Getenv("CLAWPOINT_ROOT")
-	if root == "" {
-		root = "."
-	}
-
 	llmBase := os.Getenv("ANTHROPIC_API_BASE")
 	if llmBase == "" {
 		llmBase = "https://api.z.ai/api/anthropic"
@@ -55,7 +48,6 @@ func NewMiddleware(adkURL string) *Middleware {
 		adkURL:         adkURL,
 		appName:        "clawpoint",
 		httpClient:     &http.Client{Timeout: 300 * time.Second},
-		sessionsDBPath: root + "/data/sessions.db",
 		messagesDBPath: os.Getenv("CLAWPOINT_DB"),
 		llmBaseURL:     llmBase,
 		llmAPIKey:      os.Getenv("ANTHROPIC_API_KEY"),
@@ -89,7 +81,7 @@ func (mw *Middleware) ProcessMessage(ctx context.Context, userID, sessionID, tex
 	}
 
 	// Estimate tokens
-	tokens, err := mw.estimateSessionTokens(sessionID)
+	tokens, err := mw.estimateSessionTokens(userID, sessionID)
 	if err != nil {
 		log.Printf("  token estimation failed: %v", err)
 	} else {
@@ -186,35 +178,57 @@ func (mw *Middleware) injectHeartbeatContext(text string) string {
 	return enriched
 }
 
-// estimateSessionTokens queries sessions.db for all events in a session and
-// returns an approximate token count using the chars/4 heuristic.
-func (mw *Middleware) estimateSessionTokens(sessionID string) (int, error) {
-	db, err := sql.Open("sqlite", mw.sessionsDBPath+"?mode=ro")
+// estimateSessionTokens queries the ADK API for session events and returns
+// an approximate token count using the chars/4 heuristic.
+func (mw *Middleware) estimateSessionTokens(userID, sessionID string) (int, error) {
+	events, err := mw.fetchSessionEvents(userID, sessionID)
 	if err != nil {
-		return 0, fmt.Errorf("open sessions db: %w", err)
+		return 0, err
 	}
-	defer db.Close()
-
-	// Query all content JSON blobs for this session
-	rows, err := db.Query(
-		`SELECT content FROM events WHERE session_id = ? AND content IS NOT NULL AND content != ''`,
-		sessionID,
-	)
-	if err != nil {
-		return 0, fmt.Errorf("query events: %w", err)
-	}
-	defer rows.Close()
 
 	totalChars := 0
-	for rows.Next() {
-		var contentJSON string
-		if err := rows.Scan(&contentJSON); err != nil {
+	for _, event := range events {
+		contentRaw, ok := event["content"]
+		if !ok || contentRaw == nil {
 			continue
 		}
-		totalChars += countContentChars(contentJSON)
+		contentJSON, err := json.Marshal(contentRaw)
+		if err != nil {
+			continue
+		}
+		totalChars += countContentChars(string(contentJSON))
 	}
 
 	return totalChars / 4, nil
+}
+
+// fetchSessionEvents calls the ADK API to get all events for a session.
+func (mw *Middleware) fetchSessionEvents(userID, sessionID string) ([]map[string]any, error) {
+	url := fmt.Sprintf("%s/api/apps/%s/users/%s/sessions/%s",
+		mw.adkURL, mw.appName, userID, sessionID)
+	resp, err := mw.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("get session: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read session response: %w", err)
+	}
+
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("get session HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var session struct {
+		Events []map[string]any `json:"events"`
+	}
+	if err := json.Unmarshal(body, &session); err != nil {
+		return nil, fmt.Errorf("parse session: %w", err)
+	}
+
+	return session.Events, nil
 }
 
 // countContentChars extracts text from a genai.Content JSON blob and counts characters.
@@ -246,7 +260,7 @@ func countContentChars(contentJSON string) int {
 // memories, creates a new session with the summary, and returns the new session ID.
 func (mw *Middleware) compact(ctx context.Context, userID, oldSessionID string) (string, error) {
 	// Read all events from the old session
-	transcript, err := mw.readSessionTranscript(oldSessionID)
+	transcript, err := mw.readSessionTranscript(userID, oldSessionID)
 	if err != nil {
 		return "", fmt.Errorf("read transcript: %w", err)
 	}
@@ -272,40 +286,36 @@ func (mw *Middleware) compact(ctx context.Context, userID, oldSessionID string) 
 		return "", fmt.Errorf("create new session: %w", err)
 	}
 
+	// Delete old session to free RAM
+	mw.deleteSession(userID, oldSessionID)
+
 	return newSessionID, nil
 }
 
-// readSessionTranscript reads events from sessions.db and builds a text transcript.
-func (mw *Middleware) readSessionTranscript(sessionID string) (string, error) {
-	db, err := sql.Open("sqlite", mw.sessionsDBPath+"?mode=ro")
+// readSessionTranscript fetches events from the ADK API and builds a text transcript.
+func (mw *Middleware) readSessionTranscript(userID, sessionID string) (string, error) {
+	events, err := mw.fetchSessionEvents(userID, sessionID)
 	if err != nil {
 		return "", err
 	}
-	defer db.Close()
-
-	rows, err := db.Query(
-		`SELECT author, content FROM events
-		 WHERE session_id = ? AND content IS NOT NULL AND content != ''
-		 ORDER BY timestamp ASC`,
-		sessionID,
-	)
-	if err != nil {
-		return "", err
-	}
-	defer rows.Close()
 
 	var sb strings.Builder
-	for rows.Next() {
-		var author, contentJSON string
-		if err := rows.Scan(&author, &contentJSON); err != nil {
+	for _, event := range events {
+		contentRaw, ok := event["content"]
+		if !ok || contentRaw == nil {
+			continue
+		}
+		contentJSON, err := json.Marshal(contentRaw)
+		if err != nil {
 			continue
 		}
 
-		text := extractTextFromContent(contentJSON)
+		text := extractTextFromContent(string(contentJSON))
 		if text == "" {
 			continue
 		}
 
+		author, _ := event["author"].(string)
 		if author == "" {
 			author = "unknown"
 		}
@@ -313,6 +323,28 @@ func (mw *Middleware) readSessionTranscript(sessionID string) (string, error) {
 	}
 
 	return sb.String(), nil
+}
+
+// deleteSession removes a session via the ADK API to free RAM.
+func (mw *Middleware) deleteSession(userID, sessionID string) {
+	url := fmt.Sprintf("%s/api/apps/%s/users/%s/sessions/%s",
+		mw.adkURL, mw.appName, userID, sessionID)
+	req, err := http.NewRequest(http.MethodDelete, url, nil)
+	if err != nil {
+		log.Printf("  delete session: request error: %v", err)
+		return
+	}
+	resp, err := mw.httpClient.Do(req)
+	if err != nil {
+		log.Printf("  delete session %s: %v", truncSID(sessionID), err)
+		return
+	}
+	resp.Body.Close()
+	if resp.StatusCode == 200 {
+		log.Printf("  deleted old session %s", truncSID(sessionID))
+	} else {
+		log.Printf("  delete session %s: HTTP %d", truncSID(sessionID), resp.StatusCode)
+	}
 }
 
 // extractTextFromContent pulls text parts from a genai.Content JSON blob.

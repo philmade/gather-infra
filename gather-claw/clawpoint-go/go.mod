@@ -6,7 +6,6 @@ require (
 	go.starlark.net v0.0.0-20260210143700-b62fd896b91b
 	google.golang.org/adk v0.4.0
 	google.golang.org/genai v1.46.0
-	gorm.io/gorm v1.31.0
 	modernc.org/sqlite v1.34.5
 )
 
@@ -29,8 +28,6 @@ require (
 	github.com/googleapis/gax-go/v2 v2.15.0 // indirect
 	github.com/gorilla/mux v1.8.1 // indirect
 	github.com/gorilla/websocket v1.5.3 // indirect
-	github.com/jinzhu/inflection v1.0.0 // indirect
-	github.com/jinzhu/now v1.1.5 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
 	github.com/mitchellh/mapstructure v1.5.0 // indirect
 	github.com/ncruces/go-strftime v0.1.9 // indirect
