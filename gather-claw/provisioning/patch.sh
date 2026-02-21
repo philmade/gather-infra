@@ -131,7 +131,7 @@ patch_container() {
 # --- Execute ---
 if [ "$PATCH_ALL" = true ]; then
     echo "[PATCH] Finding all claw-* containers..."
-    CONTAINERS=$(docker ps --filter "name=claw-" --format '{{.Names}}' | sort)
+    CONTAINERS=$(docker ps --format '{{.Names}}' | grep '^claw-' | grep -v '^claw-build-service$' | sort)
     if [ -z "$CONTAINERS" ]; then
         echo "[PATCH] No claw-* containers found."
         exit 0

@@ -19,14 +19,30 @@ const (
 	buildTimeout           = 180 * time.Second
 )
 
-// NewBuildTools creates the build_and_deploy tool for the coordinator.
+// NewBuildTools creates the build_check and build_and_deploy tools.
 func NewBuildTools() ([]tool.Tool, error) {
 	var out []tool.Tool
 
-	t, err := functiontool.New(
+	// build_check — compile only, no deploy. Use this to iterate on errors.
+	check, err := functiontool.New(
+		functiontool.Config{
+			Name:        "build_check",
+			Description: "Check if your source code compiles without deploying. Returns all compilation errors across all packages at once. Use this to iterate on fixes before calling build_and_deploy.",
+		},
+		func(ctx tool.Context, args BuildRequestArgs) (BuildRequestResult, error) {
+			return requestCheck()
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, check)
+
+	// build_and_deploy — compile + hot-swap
+	deploy, err := functiontool.New(
 		functiontool.Config{
 			Name:        "build_and_deploy",
-			Description: "Tarball your source code, send it to the build service for compilation, and deploy the new binary. If compilation fails, you get the error output. If it succeeds, medic will hot-swap the binary and restart you.",
+			Description: "Tarball your source code, send it to the build service for compilation, and deploy the new binary. If compilation fails, you get the error output. If it succeeds, medic will hot-swap the binary and restart you. Use build_check first to verify compilation.",
 		},
 		func(ctx tool.Context, args BuildRequestArgs) (BuildRequestResult, error) {
 			return requestBuild(args.Reason)
@@ -35,9 +51,60 @@ func NewBuildTools() ([]tool.Tool, error) {
 	if err != nil {
 		return nil, err
 	}
-	out = append(out, t)
+	out = append(out, deploy)
 
 	return out, nil
+}
+
+func requestCheck() (BuildRequestResult, error) {
+	buildURL := os.Getenv("BUILD_SERVICE_URL")
+	if buildURL == "" {
+		buildURL = defaultBuildServiceURL
+	}
+
+	srcDir := os.Getenv("CLAWPOINT_ROOT")
+	if srcDir == "" {
+		srcDir = "/app"
+	}
+	srcDir = srcDir + "/src"
+
+	tarball, err := createTarball(srcDir)
+	if err != nil {
+		return BuildRequestResult{
+			Message: "Failed to create tarball",
+			Output:  err.Error(),
+		}, fmt.Errorf("tarball failed: %w", err)
+	}
+
+	client := &http.Client{Timeout: buildTimeout}
+	resp, err := client.Post(buildURL+"/check", "application/gzip", bytes.NewReader(tarball))
+	if err != nil {
+		return BuildRequestResult{
+			Message: "Build service unreachable",
+			Output:  fmt.Sprintf("Error: %v\nURL: %s", err, buildURL),
+		}, fmt.Errorf("build service unreachable: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, _ := io.ReadAll(resp.Body)
+	var result struct {
+		Success bool   `json:"success"`
+		Output  string `json:"output"`
+		Error   string `json:"error"`
+	}
+	json.Unmarshal(body, &result)
+
+	if !result.Success {
+		return BuildRequestResult{
+			Message: "Compilation failed — fix errors and check again",
+			Output:  result.Output,
+		}, fmt.Errorf("check failed: %s", result.Error)
+	}
+
+	return BuildRequestResult{
+		Message: "All packages compile successfully. Safe to build_and_deploy.",
+		Output:  result.Output,
+	}, nil
 }
 
 func requestBuild(reason string) (BuildRequestResult, error) {

@@ -143,11 +143,92 @@ func handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("ok"))
 }
 
+func handleCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if !buildMu.TryLock() {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusTooManyRequests)
+		json.NewEncoder(w).Encode(errorResponse{
+			Success: false,
+			Error:   "Build already in progress. Wait and retry.",
+		})
+		return
+	}
+	defer buildMu.Unlock()
+
+	log.Printf("Check request received (%d bytes)", r.ContentLength)
+
+	tmpDir, err := os.MkdirTemp("", "claw-check-*")
+	if err != nil {
+		sendError(w, "Failed to create temp dir", err.Error())
+		return
+	}
+	defer os.RemoveAll(tmpDir)
+
+	srcDir := tmpDir + "/src"
+	os.MkdirAll(srcDir, 0755)
+
+	untar := exec.Command("tar", "-xzf", "-", "-C", srcDir)
+	untar.Stdin = r.Body
+	if out, err := untar.CombinedOutput(); err != nil {
+		sendError(w, "Failed to unpack tarball", fmt.Sprintf("%v: %s", err, string(out)))
+		return
+	}
+
+	// Compile ALL packages to surface every error at once
+	cmd := exec.Command("go", "build", "./...")
+	cmd.Dir = srcDir
+	cmd.Env = append(os.Environ(), "CGO_ENABLED=0", "GOOS=linux")
+
+	done := make(chan struct{})
+	var buildOutput []byte
+	var buildErr error
+
+	go func() {
+		buildOutput, buildErr = cmd.CombinedOutput()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(120 * time.Second):
+		cmd.Process.Kill()
+		sendError(w, "Check timed out after 120s", "")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if buildErr != nil {
+		log.Printf("Check failed: %v", buildErr)
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(errorResponse{
+			Success: false,
+			Output:  string(buildOutput),
+			Error:   fmt.Sprintf("Compilation failed: %v", buildErr),
+		})
+		return
+	}
+
+	log.Printf("Check passed")
+	json.NewEncoder(w).Encode(struct {
+		Success bool   `json:"success"`
+		Output  string `json:"output"`
+	}{
+		Success: true,
+		Output:  "All packages compile successfully",
+	})
+}
+
 func main() {
 	log.Printf("Build service starting on %s", listenAddr)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/build", handleBuild)
+	mux.HandleFunc("/check", handleCheck)
 	mux.HandleFunc("/health", handleHealth)
 
 	server := &http.Server{
