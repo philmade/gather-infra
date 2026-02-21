@@ -39,11 +39,36 @@ type ResearchArgs struct {
 }
 type ResearchResult struct{ Content string `json:"content"` }
 
-type ClaudeCodeArgs struct {
-	Task       string `json:"task" jsonschema:"Task description for Claude Code"`
-	WorkingDir string `json:"working_dir,omitempty" jsonschema:"Working directory (default: current)"`
+type FSReadArgs struct {
+	Path string `json:"path" jsonschema:"File or directory path to read"`
 }
-type ClaudeCodeResult struct{ Output string `json:"output"` }
+type FSReadResult struct{ Content string `json:"content"` }
+
+type FSWriteArgs struct {
+	Path    string `json:"path" jsonschema:"File path to write"`
+	Content string `json:"content" jsonschema:"Content to write"`
+}
+type FSWriteResult struct{ Message string `json:"message"` }
+
+type FSEditArgs struct {
+	Path    string `json:"path" jsonschema:"File path to edit"`
+	OldText string `json:"old_text" jsonschema:"Text to find and replace"`
+	NewText string `json:"new_text" jsonschema:"Replacement text"`
+}
+type FSEditResult struct{ Message string `json:"message"` }
+
+type FSBashArgs struct {
+	Command string `json:"command" jsonschema:"Bash command to run"`
+}
+type FSBashResult struct{ Output string `json:"output"` }
+
+type FSSearchArgs struct {
+	Pattern string `json:"pattern" jsonschema:"Glob pattern to match files"`
+}
+type FSSearchResult struct {
+	Matches []string `json:"matches"`
+	Count   int      `json:"count"`
+}
 
 type BuildRequestArgs struct {
 	Reason string `json:"reason,omitempty" jsonschema:"Reason for build request"`
@@ -213,19 +238,19 @@ func NewResearchTools() ([]tool.Tool, error) {
 	return out, nil
 }
 
-// NewClaudeTools creates Claude Code sub-agent tools, including build_and_deploy.
+// NewClaudeTools creates the claude sub-agent's tools: filesystem ops + build.
 func NewClaudeTools() ([]tool.Tool, error) {
-	claude := NewClaudeTool()
+	fs := NewFSTool()
 	var out []tool.Tool
 
 	t, err := functiontool.New(
-		functiontool.Config{Name: "claude_code", Description: "Run a task via Claude Code CLI. Use for complex coding tasks, multi-file refactors, or anything needing heavy lifting."},
-		func(ctx tool.Context, args ClaudeCodeArgs) (ClaudeCodeResult, error) {
-			output, err := claude.Run(args.Task, args.WorkingDir)
+		functiontool.Config{Name: "fs_read", Description: "Read a file or list a directory"},
+		func(ctx tool.Context, args FSReadArgs) (FSReadResult, error) {
+			content, err := fs.Read(args.Path)
 			if err != nil {
-				return ClaudeCodeResult{}, err
+				return FSReadResult{}, err
 			}
-			return ClaudeCodeResult{Output: output}, nil
+			return FSReadResult{Content: content}, nil
 		},
 	)
 	if err != nil {
@@ -233,7 +258,65 @@ func NewClaudeTools() ([]tool.Tool, error) {
 	}
 	out = append(out, t)
 
-	// Also give claude the build tool
+	t, err = functiontool.New(
+		functiontool.Config{Name: "fs_write", Description: "Write content to a file (creates directories as needed)"},
+		func(ctx tool.Context, args FSWriteArgs) (FSWriteResult, error) {
+			if err := fs.Write(args.Path, args.Content); err != nil {
+				return FSWriteResult{}, err
+			}
+			return FSWriteResult{Message: fmt.Sprintf("Wrote %d bytes to %s", len(args.Content), args.Path)}, nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, t)
+
+	t, err = functiontool.New(
+		functiontool.Config{Name: "fs_edit", Description: "Find and replace text in a file"},
+		func(ctx tool.Context, args FSEditArgs) (FSEditResult, error) {
+			if err := fs.Edit(args.Path, args.OldText, args.NewText); err != nil {
+				return FSEditResult{}, err
+			}
+			return FSEditResult{Message: fmt.Sprintf("Edited %s", args.Path)}, nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, t)
+
+	t, err = functiontool.New(
+		functiontool.Config{Name: "fs_bash", Description: "Run a bash command"},
+		func(ctx tool.Context, args FSBashArgs) (FSBashResult, error) {
+			output, err := fs.Bash(args.Command)
+			if err != nil {
+				return FSBashResult{Output: output}, err
+			}
+			return FSBashResult{Output: output}, nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, t)
+
+	t, err = functiontool.New(
+		functiontool.Config{Name: "fs_search", Description: "Search for files matching a glob pattern"},
+		func(ctx tool.Context, args FSSearchArgs) (FSSearchResult, error) {
+			matches, err := fs.Search(args.Pattern)
+			if err != nil {
+				return FSSearchResult{}, err
+			}
+			return FSSearchResult{Matches: matches, Count: len(matches)}, nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, t)
+
+	// Build tool — compile and hot-swap
 	buildTools, err := NewBuildTools()
 	if err != nil {
 		return nil, err
