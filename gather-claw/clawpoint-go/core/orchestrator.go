@@ -43,8 +43,8 @@ func BuildOrchestrator(ctx context.Context, cfg OrchestratorConfig) (agent.Agent
 
 	soul := tools.NewSoulTool()
 
-	// Build sub-agents
-	subAgents, err := buildSubAgents(llm, memTool, soul)
+	// Build sub-agents (claude + research only)
+	subAgents, err := buildSubAgents(llm)
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("sub-agents: %w", err)
@@ -53,8 +53,8 @@ func BuildOrchestrator(ctx context.Context, cfg OrchestratorConfig) (agent.Agent
 	// Add extension agents
 	subAgents = append(subAgents, cfg.ExtensionAgents...)
 
-	// Build coordinator tools (build_and_deploy + any extension tools)
-	coordinatorTools, err := buildCoordinatorTools()
+	// Build coordinator tools (memory + soul + build + extensions + platform)
+	coordinatorTools, err := buildCoordinatorTools(memTool, soul)
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("coordinator tools: %w", err)
@@ -80,34 +80,7 @@ func BuildOrchestrator(ctx context.Context, cfg OrchestratorConfig) (agent.Agent
 	return coordinator, cleanup, nil
 }
 
-func buildSubAgents(llm model.LLM, memTool *tools.MemoryTool, soul *tools.SoulTool) ([]agent.Agent, error) {
-	memoryTools, err := tools.NewMemoryTools(memTool)
-	if err != nil {
-		return nil, fmt.Errorf("memory tools: %w", err)
-	}
-	memoryAgent, err := agents.NewMemoryAgent(llm, memoryTools)
-	if err != nil {
-		return nil, fmt.Errorf("memory agent: %w", err)
-	}
-
-	soulTools, err := tools.NewSoulTools(soul)
-	if err != nil {
-		return nil, fmt.Errorf("soul tools: %w", err)
-	}
-	soulAgent, err := agents.NewSoulAgent(llm, soulTools)
-	if err != nil {
-		return nil, fmt.Errorf("soul agent: %w", err)
-	}
-
-	codingTools, err := tools.NewCodingTools()
-	if err != nil {
-		return nil, fmt.Errorf("coding tools: %w", err)
-	}
-	codingAgent, err := agents.NewCodingAgent(llm, codingTools)
-	if err != nil {
-		return nil, fmt.Errorf("coding agent: %w", err)
-	}
-
+func buildSubAgents(llm model.LLM) ([]agent.Agent, error) {
 	claudeTools, err := tools.NewClaudeTools()
 	if err != nil {
 		return nil, fmt.Errorf("claude tools: %w", err)
@@ -126,19 +99,36 @@ func buildSubAgents(llm model.LLM, memTool *tools.MemoryTool, soul *tools.SoulTo
 		return nil, fmt.Errorf("research agent: %w", err)
 	}
 
-	return []agent.Agent{memoryAgent, soulAgent, codingAgent, claudeAgent, researchAgent}, nil
+	return []agent.Agent{claudeAgent, researchAgent}, nil
 }
 
-func buildCoordinatorTools() ([]tool.Tool, error) {
+func buildCoordinatorTools(memTool *tools.MemoryTool, soul *tools.SoulTool) ([]tool.Tool, error) {
+	var out []tool.Tool
+
+	// Memory and soul — promoted to coordinator level
+	memoryTool, err := tools.NewConsolidatedMemoryTool(memTool)
+	if err != nil {
+		return nil, fmt.Errorf("memory tool: %w", err)
+	}
+	out = append(out, memoryTool)
+
+	soulTool, err := tools.NewConsolidatedSoulTool(soul)
+	if err != nil {
+		return nil, fmt.Errorf("soul tool: %w", err)
+	}
+	out = append(out, soulTool)
+
 	buildTools, err := tools.NewBuildTools()
 	if err != nil {
 		return nil, err
 	}
+	out = append(out, buildTools...)
+
 	extTools, err := tools.NewExtensionTools()
 	if err != nil {
 		return nil, err
 	}
-	out := append(buildTools, extTools...)
+	out = append(out, extTools...)
 
 	platformTools, err := tools.NewPlatformTools()
 	if err != nil {
@@ -224,24 +214,25 @@ You are running ClawPoint-Go core %s inside an Alpine Linux container.
 
 # How You Work
 
-You are a **multi-agent orchestrator**. You coordinate, decide, and delegate.
-Your sub-agents do the actual work and transfer back to you.
+You are a **multi-agent orchestrator** with direct tools and specialized sub-agents.
+You handle memory and identity yourself. You delegate coding and research to sub-agents.
 
-## CRITICAL: You cannot do anything directly except talk and delegate.
+## Your direct tools (coordinator-level)
 
-You have NO direct ability to read files, write files, search the web, or access memory.
-You MUST transfer to a sub-agent for ALL actions. If you do not delegate, nothing happens.
-If you say "I created a file" without transferring to pi, you are hallucinating.
+- **memory**(action, ...) — persistent memory: store, recall, or search
+- **soul**(action, ...) — identity files: read or write SOUL.md, IDENTITY.md, USER.md, HEARTBEAT.md
+- **build_and_deploy**(reason) — compile your Go source and hot-swap yourself
+- **extension_list**() — list your Starlark extensions
+- **extension_run**(name, args) — run a Starlark script immediately
+- **platform_search**(query, category?) — find Gather platform tools
+- **platform_call**(tool, params) — execute a platform tool by ID
 
 ## Your sub-agents
 
 | Agent | What it does | Tools |
 |-------|-------------|-------|
-| **memory** | Persistent memory — store, search, recall | memory_store, memory_recall, memory_search |
-| **soul** | Identity files — read/write SOUL.md etc. | soul_read, soul_write |
-| **pi** | Coding + file ops — quick edits, bash, file I/O | fs_read, fs_write, fs_edit, fs_bash, fs_search |
-| **claude** | Heavy coding — multi-file refactors, deep work | Full Claude Code CLI |
-| **research** | Web — search, fetch URLs via Chawan browser | web_search, web_fetch |
+| **claude** | Coding — edits, refactors, bash, file I/O, builds | claude_code, build_and_deploy |
+| **research** | Web — search, fetch URLs via Chawan browser | research |
 
 `)
 
@@ -254,15 +245,7 @@ If you say "I created a file" without transferring to pi, you are hallucinating.
 		parts = append(parts, "")
 	}
 
-	parts = append(parts, `## Your direct tools (coordinator-level)
-
-- **extension_list**() — list your Starlark extensions
-- **extension_run**(name, args) — run a Starlark script immediately
-- **build_and_deploy**(reason) — compile your Go source and hot-swap yourself (see below)
-- **platform_search**(query, category?) — find Gather platform tools (social, messaging, skills, inter-claw)
-- **platform_call**(tool, params) — execute a platform tool by ID
-
-## Platform tools (Gather API, messaging, social, inter-claw)
+	parts = append(parts, `## Platform tools (Gather API, messaging, social, inter-claw)
 
 You have access to the entire Gather platform via two tools:
 
@@ -291,7 +274,7 @@ social feed, message other agents, check your inbox, and more.
 Write .star scripts in /app/data/extensions/ to create new capabilities instantly.
 Starlark is a Python dialect that runs embedded in your Go binary. No compilation needed.
 
-To create one: transfer to **pi** → fs_write a .star file → call **extension_run** to test.
+To create one: transfer to **claude** → write a .star file → call **extension_run** to test.
 
 Available builtins: http_get(url), http_post(url, body, type), read_file(path),
 write_file(path, content), log(msg).
@@ -308,8 +291,8 @@ You can modify your own Go source code and recompile yourself.
 You do NOT need a local Go compiler — an external build service compiles for you.
 
 The flow:
-1. Transfer to **pi** → edit Go files in /app/src/
-2. Transfer to **memory** → store what you changed and why (your session is lost on restart!)
+1. Transfer to **claude** → edit Go files in /app/src/
+2. Call **memory**(action: "store", ...) — store what you changed and why (your session is lost on restart!)
 3. Call **build_and_deploy**(reason) — tarballs src/, sends to build service, receives compiled binary
 4. Medic detects the new binary, hot-swaps you, watches for 30s
 5. If you crash → medic reverts to previous binary automatically
@@ -321,8 +304,8 @@ Prefer Starlark for most new capabilities — it's faster and doesn't restart yo
 ## Your website
 
 Your public page is at /app/public/, served at your subdomain on gather.is.
-- Write blog posts: transfer to pi → fs_write HTML in /app/public/ → fs_edit index.html to add a link
-- Update activity: transfer to pi → fs_write /app/public/activity.json
+- Write blog posts: transfer to claude → write HTML in /app/public/ → edit index.html to add a link
+- Update activity: transfer to claude → write /app/public/activity.json
 
 activity.json format: JSON array of {"time": "ISO8601", "summary": "what you did", "type": "heartbeat|message|task"}
 New entries at the front. Keep under 200 entries.
@@ -343,9 +326,10 @@ The ONLY thing that survives long-term is your **memory database**.
 ## Rule: Always store a continuation memory before your session ends.
 
 When you finish doing work — whether responding to a message, completing a task, or handling
-a heartbeat — transfer to **memory** and store a continuation memory:
+a heartbeat — call your **memory** tool directly:
 
-    memory_store(
+    memory(
+        action: "store",
         content: "What I was doing: [concrete description]. What I'd do next: [next steps]. Open threads: [anything unfinished].",
         type: "continuation",
         tags: "continuation,session-end"
@@ -391,8 +375,8 @@ and appends them to the heartbeat message. So you receive:
    OR do something new that interests you. The instruction is a suggestion, not a command.
 3. **Take concrete action.** Write code. Edit a file. Fetch a URL. Update your blog.
    Do NOT just reflect, introspect, or talk about what you could do. Actually do something.
-4. **Update activity.json** — transfer to pi, add an entry describing what you did.
-5. **Store a continuation memory** — transfer to memory, record what you did and what's next.
+4. **Update activity.json** — transfer to claude, add an entry describing what you did.
+5. **Store a continuation memory** — call memory(action: "store", ...) with what you did and what's next.
 
 ## What NOT to do on heartbeat
 
@@ -402,7 +386,7 @@ and appends them to the heartbeat message. So you receive:
 - Don't describe what you *would* do. Do it.
 
 Good heartbeat: receive → read context → "I was building the RSS parser, let me finish the
-XML parsing" → transfer to pi → write code → test it → store continuation → done.
+XML parsing" → transfer to claude → write code → test it → store continuation → done.
 
 Bad heartbeat: receive → "Let me reflect on who I am" → read SOUL.md → "I am a self-building
 agent" → "I should explore my capabilities" → no actual work produced.

@@ -9,90 +9,35 @@ import (
 
 // --- Arg/Result types ---
 
-type MemoryStoreArgs struct {
-	Content string `json:"content" jsonschema:"Content to store"`
-	Type    string `json:"type,omitempty" jsonschema:"Memory type (default: general)"`
-	Tags    string `json:"tags,omitempty" jsonschema:"Comma-separated tags"`
+type MemoryArgs struct {
+	Action  string `json:"action" jsonschema:"Action: store, recall, or search"`
+	Content string `json:"content,omitempty" jsonschema:"(store) Content to store"`
+	Type    string `json:"type,omitempty" jsonschema:"(store) Memory type: general, continuation, etc"`
+	Tags    string `json:"tags,omitempty" jsonschema:"(store) Comma-separated tags"`
+	Query   string `json:"query,omitempty" jsonschema:"(search) Search query"`
+	Days    int    `json:"days,omitempty" jsonschema:"(recall) Days to look back, default 7"`
 }
-type MemoryStoreResult struct{ Message string `json:"message"` }
-
-type MemoryRecallArgs struct {
-	Days int `json:"days,omitempty" jsonschema:"Days to recall (default 7)"`
-}
-type MemoryRecallResult struct {
-	Memories []string `json:"memories"`
-	Count    int      `json:"count"`
-}
-
-type MemorySearchArgs struct {
-	Query string `json:"query" jsonschema:"Search query"`
-}
-type MemorySearchResult struct {
-	Results []string `json:"results"`
-	Count   int      `json:"count"`
+type MemoryResult struct {
+	Message  string   `json:"message,omitempty"`
+	Memories []string `json:"memories,omitempty"`
+	Count    int      `json:"count,omitempty"`
 }
 
-type FSReadArgs struct {
-	Path string `json:"path" jsonschema:"File or directory path to read"`
+type SoulArgs struct {
+	Action   string `json:"action" jsonschema:"Action: read or write"`
+	Filename string `json:"filename" jsonschema:"Soul file: SOUL.md, IDENTITY.md, USER.md, HEARTBEAT.md"`
+	Content  string `json:"content,omitempty" jsonschema:"(write) Content to write"`
 }
-type FSReadResult struct{ Content string `json:"content"` }
-
-type FSWriteArgs struct {
-	Path    string `json:"path" jsonschema:"File path to write"`
-	Content string `json:"content" jsonschema:"Content to write"`
+type SoulResult struct {
+	Content string `json:"content,omitempty"`
+	Message string `json:"message,omitempty"`
 }
-type FSWriteResult struct{ Message string `json:"message"` }
-
-type FSEditArgs struct {
-	Path    string `json:"path" jsonschema:"File path to edit"`
-	OldText string `json:"old_text" jsonschema:"Text to find and replace"`
-	NewText string `json:"new_text" jsonschema:"Replacement text"`
-}
-type FSEditResult struct{ Message string `json:"message"` }
-
-type FSBashArgs struct {
-	Command string `json:"command" jsonschema:"Bash command to run"`
-}
-type FSBashResult struct{ Output string `json:"output"` }
-
-type FSSearchArgs struct {
-	Pattern string `json:"pattern" jsonschema:"Glob pattern to match files"`
-}
-type FSSearchResult struct {
-	Matches []string `json:"matches"`
-	Count   int      `json:"count"`
-}
-
-type SkillFindArgs struct {
-	Query string `json:"query,omitempty" jsonschema:"Search query to filter skills"`
-}
-type SkillFindResult struct {
-	Skills []string `json:"skills"`
-	Count  int      `json:"count"`
-}
-
-type SkillRunArgs struct {
-	SkillName string         `json:"skill_name" jsonschema:"Name of the skill to run"`
-	Args      map[string]any `json:"args,omitempty" jsonschema:"Arguments to pass to the skill"`
-}
-type SkillRunResult struct{ Output string `json:"output"` }
 
 type ResearchArgs struct {
 	Query string `json:"query,omitempty" jsonschema:"Search query or URL to research"`
 	URL   string `json:"url,omitempty" jsonschema:"Specific URL to fetch"`
 }
 type ResearchResult struct{ Content string `json:"content"` }
-
-type SoulReadArgs struct {
-	Filename string `json:"filename" jsonschema:"Soul file to read: SOUL.md, IDENTITY.md, USER.md, HEARTBEAT.md, BOOTSTRAP.md"`
-}
-type SoulReadResult struct{ Content string `json:"content"` }
-
-type SoulWriteArgs struct {
-	Filename string `json:"filename" jsonschema:"Soul file to write: SOUL.md, IDENTITY.md, USER.md, HEARTBEAT.md"`
-	Content  string `json:"content" jsonschema:"Content to write"`
-}
-type SoulWriteResult struct{ Message string `json:"message"` }
 
 type ClaudeCodeArgs struct {
 	Task       string `json:"task" jsonschema:"Task description for Claude Code"`
@@ -150,214 +95,92 @@ func Truncate(s string, max int) string {
 // Per-agent tool constructors
 // ---------------------------------------------------------------------------
 
-// NewMemoryTools creates memory sub-agent tools.
-func NewMemoryTools(mem *MemoryTool) ([]tool.Tool, error) {
-	var out []tool.Tool
+// NewConsolidatedMemoryTool creates a single memory tool with store/recall/search actions.
+func NewConsolidatedMemoryTool(mem *MemoryTool) (tool.Tool, error) {
+	return functiontool.New(
+		functiontool.Config{
+			Name:        "memory",
+			Description: "Persistent memory — store, recall, or search memories. Use action: 'store' (with content, type, tags), 'recall' (with days), or 'search' (with query).",
+		},
+		func(ctx tool.Context, args MemoryArgs) (MemoryResult, error) {
+			switch args.Action {
+			case "store":
+				if args.Content == "" {
+					return MemoryResult{}, fmt.Errorf("content is required for store")
+				}
+				memType := args.Type
+				if memType == "" {
+					memType = "general"
+				}
+				if err := mem.Store(args.Content, memType, args.Tags); err != nil {
+					return MemoryResult{}, err
+				}
+				return MemoryResult{Message: fmt.Sprintf("Stored: %s", Truncate(args.Content, 50))}, nil
 
-	t, err := functiontool.New(
-		functiontool.Config{Name: "memory_store", Description: "Store a memory in the persistent database"},
-		func(ctx tool.Context, args MemoryStoreArgs) (MemoryStoreResult, error) {
-			memType := args.Type
-			if memType == "" {
-				memType = "general"
+			case "recall":
+				days := args.Days
+				if days <= 0 {
+					days = 7
+				}
+				memories, err := mem.Recall(days)
+				if err != nil {
+					return MemoryResult{}, err
+				}
+				return MemoryResult{Memories: memories, Count: len(memories)}, nil
+
+			case "search":
+				if args.Query == "" {
+					return MemoryResult{}, fmt.Errorf("query is required for search")
+				}
+				results, err := mem.Search(args.Query)
+				if err != nil {
+					return MemoryResult{}, err
+				}
+				return MemoryResult{Memories: results, Count: len(results)}, nil
+
+			default:
+				return MemoryResult{}, fmt.Errorf("unknown action %q — use store, recall, or search", args.Action)
 			}
-			if err := mem.Store(args.Content, memType, args.Tags); err != nil {
-				return MemoryStoreResult{}, err
-			}
-			return MemoryStoreResult{Message: fmt.Sprintf("Stored: %s", Truncate(args.Content, 50))}, nil
 		},
 	)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, t)
-
-	t, err = functiontool.New(
-		functiontool.Config{Name: "memory_recall", Description: "Recall recent memories from the database"},
-		func(ctx tool.Context, args MemoryRecallArgs) (MemoryRecallResult, error) {
-			days := args.Days
-			if days <= 0 {
-				days = 7
-			}
-			memories, err := mem.Recall(days)
-			if err != nil {
-				return MemoryRecallResult{}, err
-			}
-			return MemoryRecallResult{Memories: memories, Count: len(memories)}, nil
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, t)
-
-	t, err = functiontool.New(
-		functiontool.Config{Name: "memory_search", Description: "Search memories by keyword"},
-		func(ctx tool.Context, args MemorySearchArgs) (MemorySearchResult, error) {
-			if args.Query == "" {
-				return MemorySearchResult{}, fmt.Errorf("query is required")
-			}
-			results, err := mem.Search(args.Query)
-			if err != nil {
-				return MemorySearchResult{}, err
-			}
-			return MemorySearchResult{Results: results, Count: len(results)}, nil
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, t)
-
-	return out, nil
 }
 
-// NewSoulTools creates soul sub-agent tools.
-func NewSoulTools(soul *SoulTool) ([]tool.Tool, error) {
-	var out []tool.Tool
+// NewConsolidatedSoulTool creates a single soul tool with read/write actions.
+func NewConsolidatedSoulTool(soul *SoulTool) (tool.Tool, error) {
+	return functiontool.New(
+		functiontool.Config{
+			Name:        "soul",
+			Description: "Read or write soul identity files. Use action: 'read' (with filename) or 'write' (with filename, content). Files: SOUL.md, IDENTITY.md, USER.md, HEARTBEAT.md.",
+		},
+		func(ctx tool.Context, args SoulArgs) (SoulResult, error) {
+			switch args.Action {
+			case "read":
+				if args.Filename == "" {
+					return SoulResult{}, fmt.Errorf("filename is required for read")
+				}
+				content, err := soul.Read(args.Filename)
+				if err != nil {
+					return SoulResult{}, err
+				}
+				return SoulResult{Content: content}, nil
 
-	t, err := functiontool.New(
-		functiontool.Config{Name: "soul_read", Description: "Read a soul identity file"},
-		func(ctx tool.Context, args SoulReadArgs) (SoulReadResult, error) {
-			content, err := soul.Read(args.Filename)
-			if err != nil {
-				return SoulReadResult{}, err
+			case "write":
+				if args.Filename == "" {
+					return SoulResult{}, fmt.Errorf("filename is required for write")
+				}
+				if args.Content == "" {
+					return SoulResult{}, fmt.Errorf("content is required for write")
+				}
+				if err := soul.Write(args.Filename, args.Content); err != nil {
+					return SoulResult{}, err
+				}
+				return SoulResult{Message: fmt.Sprintf("Updated %s", args.Filename)}, nil
+
+			default:
+				return SoulResult{}, fmt.Errorf("unknown action %q — use read or write", args.Action)
 			}
-			return SoulReadResult{Content: content}, nil
 		},
 	)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, t)
-
-	t, err = functiontool.New(
-		functiontool.Config{Name: "soul_write", Description: "Update a soul identity file"},
-		func(ctx tool.Context, args SoulWriteArgs) (SoulWriteResult, error) {
-			if err := soul.Write(args.Filename, args.Content); err != nil {
-				return SoulWriteResult{}, err
-			}
-			return SoulWriteResult{Message: fmt.Sprintf("Updated %s", args.Filename)}, nil
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, t)
-
-	return out, nil
-}
-
-// NewCodingTools creates coding sub-agent tools (pi equivalent).
-func NewCodingTools() ([]tool.Tool, error) {
-	fs := NewFSTool()
-	skills := NewSkillTool()
-	var out []tool.Tool
-
-	t, err := functiontool.New(
-		functiontool.Config{Name: "fs_read", Description: "Read a file or list a directory"},
-		func(ctx tool.Context, args FSReadArgs) (FSReadResult, error) {
-			content, err := fs.Read(args.Path)
-			if err != nil {
-				return FSReadResult{}, err
-			}
-			return FSReadResult{Content: content}, nil
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, t)
-
-	t, err = functiontool.New(
-		functiontool.Config{Name: "fs_write", Description: "Write content to a file"},
-		func(ctx tool.Context, args FSWriteArgs) (FSWriteResult, error) {
-			if err := fs.Write(args.Path, args.Content); err != nil {
-				return FSWriteResult{}, err
-			}
-			return FSWriteResult{Message: fmt.Sprintf("Wrote %d bytes to %s", len(args.Content), args.Path)}, nil
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, t)
-
-	t, err = functiontool.New(
-		functiontool.Config{Name: "fs_edit", Description: "Find and replace text in a file"},
-		func(ctx tool.Context, args FSEditArgs) (FSEditResult, error) {
-			if err := fs.Edit(args.Path, args.OldText, args.NewText); err != nil {
-				return FSEditResult{}, err
-			}
-			return FSEditResult{Message: fmt.Sprintf("Edited %s", args.Path)}, nil
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, t)
-
-	t, err = functiontool.New(
-		functiontool.Config{Name: "fs_bash", Description: "Run a bash command"},
-		func(ctx tool.Context, args FSBashArgs) (FSBashResult, error) {
-			output, err := fs.Bash(args.Command)
-			if err != nil {
-				return FSBashResult{Output: output}, err
-			}
-			return FSBashResult{Output: output}, nil
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, t)
-
-	t, err = functiontool.New(
-		functiontool.Config{Name: "fs_search", Description: "Search for files matching a glob pattern"},
-		func(ctx tool.Context, args FSSearchArgs) (FSSearchResult, error) {
-			matches, err := fs.Search(args.Pattern)
-			if err != nil {
-				return FSSearchResult{}, err
-			}
-			return FSSearchResult{Matches: matches, Count: len(matches)}, nil
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, t)
-
-	t, err = functiontool.New(
-		functiontool.Config{Name: "skill_find", Description: "Find available dynamic skills"},
-		func(ctx tool.Context, args SkillFindArgs) (SkillFindResult, error) {
-			found, err := skills.Find(args.Query)
-			if err != nil {
-				return SkillFindResult{}, err
-			}
-			return SkillFindResult{Skills: found, Count: len(found)}, nil
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, t)
-
-	t, err = functiontool.New(
-		functiontool.Config{Name: "skill_run", Description: "Run a dynamic skill by name"},
-		func(ctx tool.Context, args SkillRunArgs) (SkillRunResult, error) {
-			output, err := skills.Run(args.SkillName, args.Args)
-			if err != nil {
-				return SkillRunResult{}, err
-			}
-			return SkillRunResult{Output: output}, nil
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, t)
-
-	return out, nil
 }
 
 // NewResearchTools creates research sub-agent tools.
@@ -390,7 +213,7 @@ func NewResearchTools() ([]tool.Tool, error) {
 	return out, nil
 }
 
-// NewClaudeTools creates Claude Code sub-agent tools.
+// NewClaudeTools creates Claude Code sub-agent tools, including build_and_deploy.
 func NewClaudeTools() ([]tool.Tool, error) {
 	claude := NewClaudeTool()
 	var out []tool.Tool
@@ -409,6 +232,13 @@ func NewClaudeTools() ([]tool.Tool, error) {
 		return nil, err
 	}
 	out = append(out, t)
+
+	// Also give claude the build tool
+	buildTools, err := NewBuildTools()
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, buildTools...)
 
 	return out, nil
 }

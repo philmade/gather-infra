@@ -64,8 +64,14 @@ fi
 export ADK_PORT=8081
 
 # --- Start clawpoint-go (internal, port 8081) ---
+# ADK_WEBUI_ADDRESS lets the web UI know where the API is from the browser's perspective.
+# For local dev with exposed port 8181, set ADK_WEBUI_ADDRESS=http://localhost:8181/api
+WEBUI_FLAG=""
+if [ -n "$ADK_WEBUI_ADDRESS" ]; then
+    WEBUI_FLAG="-api_server_address ${ADK_WEBUI_ADDRESS}"
+fi
 echo "Starting clawpoint-go on :${ADK_PORT}..."
-./clawpoint-go web -port ${ADK_PORT} api webui > /tmp/adk-go.log 2>&1 &
+./clawpoint-go web -port ${ADK_PORT} api webui ${WEBUI_FLAG} > /tmp/adk-go.log 2>&1 &
 
 # --- Start proxy (public-facing, port 8080 → ADK on 8081) ---
 echo "Starting clawpoint-proxy on :8080..."

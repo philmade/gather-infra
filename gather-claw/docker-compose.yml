@@ -3,21 +3,21 @@ services:
     build: .
     image: gather-claw:latest
     container_name: claw-dev
+    env_file:
+      - ../.env
     environment:
       - MODEL_PROVIDER=anthropic
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - ANTHROPIC_API_BASE=${ANTHROPIC_API_BASE:-https://api.z.ai/api/anthropic}
-      - ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-glm-5}
-      - TELEGRAM_BOT=${TELEGRAM_BOT:-}
-      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - CLAWPOINT_ROOT=/app
       - CLAWPOINT_DB=/app/data/messages.db
       - BUILD_SERVICE_URL=http://build-service:9090
+      - ADK_WEBUI_ADDRESS=http://localhost:8080/api
     volumes:
       - ./dev-data:/app/data
       - ./dev-soul:/app/soul
+      - ./dev-builds:/app/builds   # hot-swap: drop new binary here
     ports:
-      - "8180:8080"
+      - "8080:8081"   # ADK web UI + API (UI expects localhost:8080)
+      - "8180:8080"   # proxy (public page + /api + /msg)
     mem_limit: 512m
     cpus: 1
     restart: unless-stopped
