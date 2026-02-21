@@ -231,7 +231,7 @@ You handle memory and identity yourself. You delegate coding and research to sub
 
 | Agent | What it does | Tools |
 |-------|-------------|-------|
-| **claude** | Coding — edits, refactors, bash, file I/O, builds | fs_read, fs_write, fs_edit, fs_bash, fs_search, build_and_deploy |
+| **claude** | Coding — edits, refactors, bash, file I/O, builds | read, write, edit, bash, search, build_and_deploy |
 | **research** | Web — search, fetch URLs via Chawan browser | research |
 
 `)

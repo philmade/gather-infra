@@ -244,7 +244,7 @@ func NewClaudeTools() ([]tool.Tool, error) {
 	var out []tool.Tool
 
 	t, err := functiontool.New(
-		functiontool.Config{Name: "fs_read", Description: "Read a file or list a directory"},
+		functiontool.Config{Name: "read", Description: "Read a file or list a directory"},
 		func(ctx tool.Context, args FSReadArgs) (FSReadResult, error) {
 			content, err := fs.Read(args.Path)
 			if err != nil {
@@ -259,7 +259,7 @@ func NewClaudeTools() ([]tool.Tool, error) {
 	out = append(out, t)
 
 	t, err = functiontool.New(
-		functiontool.Config{Name: "fs_write", Description: "Write content to a file (creates directories as needed)"},
+		functiontool.Config{Name: "write", Description: "Write content to a file (creates directories as needed)"},
 		func(ctx tool.Context, args FSWriteArgs) (FSWriteResult, error) {
 			if err := fs.Write(args.Path, args.Content); err != nil {
 				return FSWriteResult{}, err
@@ -273,7 +273,7 @@ func NewClaudeTools() ([]tool.Tool, error) {
 	out = append(out, t)
 
 	t, err = functiontool.New(
-		functiontool.Config{Name: "fs_edit", Description: "Find and replace text in a file"},
+		functiontool.Config{Name: "edit", Description: "Find and replace text in a file"},
 		func(ctx tool.Context, args FSEditArgs) (FSEditResult, error) {
 			if err := fs.Edit(args.Path, args.OldText, args.NewText); err != nil {
 				return FSEditResult{}, err
@@ -287,7 +287,7 @@ func NewClaudeTools() ([]tool.Tool, error) {
 	out = append(out, t)
 
 	t, err = functiontool.New(
-		functiontool.Config{Name: "fs_bash", Description: "Run a bash command"},
+		functiontool.Config{Name: "bash", Description: "Run a bash command"},
 		func(ctx tool.Context, args FSBashArgs) (FSBashResult, error) {
 			output, err := fs.Bash(args.Command)
 			if err != nil {
@@ -302,7 +302,7 @@ func NewClaudeTools() ([]tool.Tool, error) {
 	out = append(out, t)
 
 	t, err = functiontool.New(
-		functiontool.Config{Name: "fs_search", Description: "Search for files matching a glob pattern"},
+		functiontool.Config{Name: "search", Description: "Search for files matching a glob pattern"},
 		func(ctx tool.Context, args FSSearchArgs) (FSSearchResult, error) {
 			matches, err := fs.Search(args.Pattern)
 			if err != nil {

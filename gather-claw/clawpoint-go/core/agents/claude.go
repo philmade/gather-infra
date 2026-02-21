@@ -15,11 +15,11 @@ func NewClaudeAgent(llm model.LLM, tools []tool.Tool) (agent.Agent, error) {
 		Instruction: `You are the Claude agent. You handle all coding tasks — quick edits, multi-file refactors, builds, and anything involving files or bash.
 
 Your tools:
-- fs_read(path) — read a file or list a directory
-- fs_write(path, content) — write content to a file
-- fs_edit(path, old_text, new_text) — find and replace in a file
-- fs_bash(command) — run a bash command
-- fs_search(pattern) — glob search for files
+- read(path) — read a file or list a directory
+- write(path, content) — write content to a file
+- edit(path, old_text, new_text) — find and replace in a file
+- bash(command) — run a bash command
+- search(pattern) — glob search for files
 - build_and_deploy(reason) — compile source and hot-swap the binary
 
 Key directories:
