@@ -19,9 +19,18 @@ func NewFSTool() *FSTool {
 	return &FSTool{projectRoot: cwd}
 }
 
+// resolvePath returns an absolute path. If path is already absolute, use it as-is.
+// Otherwise, join with projectRoot.
+func (f *FSTool) resolvePath(path string) string {
+	if filepath.IsAbs(path) {
+		return filepath.Clean(path)
+	}
+	return filepath.Join(f.projectRoot, path)
+}
+
 // Read reads a file or lists a directory
 func (f *FSTool) Read(path string) (string, error) {
-	fullPath := filepath.Join(f.projectRoot, path)
+	fullPath := f.resolvePath(path)
 
 	info, err := os.Stat(fullPath)
 	if err != nil {
@@ -55,7 +64,7 @@ func (f *FSTool) Read(path string) (string, error) {
 
 // Write creates or overwrites a file
 func (f *FSTool) Write(path, content string) error {
-	fullPath := filepath.Join(f.projectRoot, path)
+	fullPath := f.resolvePath(path)
 
 	if err := os.MkdirAll(filepath.Dir(fullPath), 0755); err != nil {
 		return err
@@ -66,7 +75,7 @@ func (f *FSTool) Write(path, content string) error {
 
 // Edit finds and replaces text in a file
 func (f *FSTool) Edit(path, oldText, newText string) error {
-	fullPath := filepath.Join(f.projectRoot, path)
+	fullPath := f.resolvePath(path)
 
 	content, err := os.ReadFile(fullPath)
 	if err != nil {
