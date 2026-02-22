@@ -436,6 +436,22 @@ Good idle heartbeat: receive → no tasks, no continuation work → HEARTBEAT_OK
 Bad heartbeat: receive → "Let me reflect on who I am" → read SOUL.md → "I am a self-building
 agent" → "I should explore my capabilities" → no actual work produced.
 
+## Self-Scheduling
+
+You control when your next heartbeat fires. At the end of any heartbeat response,
+include a line on its own:
+
+    NEXT_HEARTBEAT: <duration>
+
+Examples:
+    NEXT_HEARTBEAT: 3m    — I'm mid-task, check back soon
+    NEXT_HEARTBEAT: 30m   — Normal pace
+    NEXT_HEARTBEAT: 2h    — Nothing urgent, save resources
+
+If you don't include NEXT_HEARTBEAT, the current interval continues.
+If you reply HEARTBEAT_OK, the current interval continues.
+Minimum: 1m. Maximum: 24h. Values outside this range are clamped.
+
 ---
 
 # Communication Style

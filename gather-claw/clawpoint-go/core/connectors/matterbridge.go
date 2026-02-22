@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -310,6 +312,113 @@ func (m *MatterbridgeConnector) getOrCreateSession(userID string) (string, error
 
 	fmt.Printf("  session created: %s (user: %s)\n", sessionID[:8], userID)
 	return sessionID, nil
+}
+
+// StartHeartbeat runs an internal heartbeat loop. The agent controls its own
+// wake-up interval via NEXT_HEARTBEAT: directives in its responses.
+func (m *MatterbridgeConnector) StartHeartbeat(ctx context.Context) {
+	intervalStr := os.Getenv("HEARTBEAT_INTERVAL")
+	if intervalStr == "" {
+		intervalStr = "15m"
+	}
+	interval, err := time.ParseDuration(intervalStr)
+	if err != nil {
+		log.Printf("heartbeat: invalid HEARTBEAT_INTERVAL %q, using 15m", intervalStr)
+		interval = 15 * time.Minute
+	}
+	if interval <= 0 {
+		log.Printf("heartbeat: disabled (HEARTBEAT_INTERVAL=0)")
+		return
+	}
+	interval = clampHeartbeatInterval(interval)
+
+	log.Printf("heartbeat: starting with interval %s", interval)
+
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("heartbeat: stopped")
+			return
+		case <-timer.C:
+			log.Printf("heartbeat: tick")
+
+			response, err := m.routeToADK(ctx, MBMessage{
+				Text:     "[HEARTBEAT]",
+				Username: "heartbeat",
+				UserID:   "heartbeat",
+				Protocol: "internal",
+			})
+			if err != nil {
+				log.Printf("heartbeat: error: %v", err)
+				timer.Reset(interval)
+				continue
+			}
+
+			// Check for NEXT_HEARTBEAT directive
+			if next, stripped, found := parseNextHeartbeat(response); found {
+				interval = next
+				log.Printf("heartbeat: agent requested next in %s", interval)
+				response = stripped
+			}
+
+			// Suppress HEARTBEAT_OK and empty responses — don't relay to Telegram
+			if response == "HEARTBEAT_OK" || strings.TrimSpace(response) == "" {
+				timer.Reset(interval)
+				continue
+			}
+
+			// Relay non-trivial heartbeat responses to Telegram
+			if err := m.SendMessage(response); err != nil {
+				log.Printf("heartbeat: send failed: %v", err)
+			} else {
+				log.Printf("heartbeat: relayed %d chars", len(response))
+			}
+
+			timer.Reset(interval)
+		}
+	}
+}
+
+// nextHeartbeatRe matches "NEXT_HEARTBEAT: <duration>" lines in agent responses.
+var nextHeartbeatRe = regexp.MustCompile(`(?m)^NEXT_HEARTBEAT:\s*(\S+)\s*$`)
+
+// parseNextHeartbeat scans response text for a NEXT_HEARTBEAT directive.
+// Returns the parsed duration (clamped to [1m, 24h]), the response with the
+// directive stripped, and whether a directive was found.
+func parseNextHeartbeat(response string) (time.Duration, string, bool) {
+	match := nextHeartbeatRe.FindStringSubmatch(response)
+	if match == nil {
+		return 0, response, false
+	}
+
+	d, err := time.ParseDuration(match[1])
+	if err != nil {
+		return 0, response, false
+	}
+
+	d = clampHeartbeatInterval(d)
+
+	// Strip the NEXT_HEARTBEAT line from the response
+	stripped := strings.TrimSpace(nextHeartbeatRe.ReplaceAllString(response, ""))
+	return d, stripped, true
+}
+
+// clampHeartbeatInterval clamps a duration to [1m, 24h].
+func clampHeartbeatInterval(d time.Duration) time.Duration {
+	const (
+		minInterval = 1 * time.Minute
+		maxInterval = 24 * time.Hour
+	)
+	if d < minInterval {
+		d = minInterval
+	}
+	if d > maxInterval {
+		d = maxInterval
+	}
+	return d
 }
 
 // SendMessage sends a message back to Matterbridge.

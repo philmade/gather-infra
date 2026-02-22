@@ -34,6 +34,9 @@ func main() {
 
 	mb := connectors.NewMatterbridgeConnector(adkURL)
 
+	// Internal heartbeat (agent-controlled interval)
+	go mb.StartHeartbeat(ctx)
+
 	// Matterbridge stream reader (Telegram)
 	go func() {
 		if err := mb.Start(ctx); err != nil {
