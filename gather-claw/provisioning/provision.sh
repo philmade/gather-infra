@@ -95,6 +95,12 @@ if [ -d "$USER_DIR" ]; then
 fi
 mkdir -p "$USER_DIR/data" "$USER_DIR/soul"
 
+# --- Copy default soul files ---
+if [ -d "$SCRIPT_DIR/soul-template" ]; then
+    cp "$SCRIPT_DIR/soul-template/"* "$USER_DIR/soul/" 2>/dev/null || true
+    echo "  Default soul files copied"
+fi
+
 # --- Generate Gather identity ---
 echo "Generating Gather agent identity..."
 GATHER_PRIVATE_KEY=""

@@ -2,6 +2,7 @@ package api
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/pocketbase/pocketbase"
@@ -71,9 +72,9 @@ func sendHeartbeat(app *pocketbase.PocketBase, r *core.Record, now time.Time) {
 		return
 	}
 
-	// Save reply as channel message
+	// Save reply as channel message (suppress HEARTBEAT_OK idle signals)
 	channelID, err := findClawChannel(app, agentID)
-	if err == nil && reply != "" {
+	if err == nil && reply != "" && strings.TrimSpace(reply) != "HEARTBEAT_OK" {
 		col, err := app.FindCollectionByNameOrId("channel_messages")
 		if err == nil {
 			rec := core.NewRecord(col)

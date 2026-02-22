@@ -106,7 +106,21 @@ func (mw *Middleware) ProcessMessage(ctx context.Context, userID, sessionID, tex
 		return nil, err
 	}
 
+	// HEARTBEAT_OK suppression: if the agent said nothing needs attention,
+	// mark the result so callers can skip relaying/saving.
+	if isHeartbeatOK(response) {
+		log.Printf("  HEARTBEAT_OK — suppressing response")
+		return &ProcessResult{Text: "HEARTBEAT_OK", SessionID: sessionID}, nil
+	}
+
 	return &ProcessResult{Text: response, SessionID: sessionID}, nil
+}
+
+// isHeartbeatOK checks if the agent's response is a HEARTBEAT_OK idle signal.
+// Tolerates minor surrounding whitespace or punctuation.
+func isHeartbeatOK(response string) bool {
+	trimmed := strings.TrimSpace(response)
+	return trimmed == "HEARTBEAT_OK"
 }
 
 // injectHeartbeatContext loads the latest continuation memory and recent highlights
@@ -127,6 +141,15 @@ func (mw *Middleware) injectHeartbeatContext(text string) string {
 
 	var sb strings.Builder
 	sb.WriteString(text)
+
+	// Load HEARTBEAT.md (the agent's living task list)
+	heartbeatMD := mw.loadHeartbeatMD()
+	if heartbeatMD != "" {
+		sb.WriteString("\n\n--- YOUR TASK LIST (HEARTBEAT.md) ---\n")
+		sb.WriteString(heartbeatMD)
+	} else {
+		sb.WriteString("\n\n--- YOUR TASK LIST (HEARTBEAT.md) ---\n(empty — no pending tasks)\n")
+	}
 
 	// Load latest continuation memory (what I was last doing)
 	var continuation string
@@ -176,6 +199,21 @@ func (mw *Middleware) injectHeartbeatContext(text string) string {
 		log.Printf("  heartbeat context: injected continuation + %d memories", 3)
 	}
 	return enriched
+}
+
+// loadHeartbeatMD reads the agent's HEARTBEAT.md soul file from disk.
+// Returns the contents or empty string if the file doesn't exist.
+func (mw *Middleware) loadHeartbeatMD() string {
+	root := os.Getenv("CLAWPOINT_ROOT")
+	if root == "" {
+		root = "."
+	}
+	data, err := os.ReadFile(root + "/soul/HEARTBEAT.md")
+	if err != nil {
+		return ""
+	}
+	content := strings.TrimSpace(string(data))
+	return content
 }
 
 // estimateSessionTokens queries the ADK API for session events and returns
