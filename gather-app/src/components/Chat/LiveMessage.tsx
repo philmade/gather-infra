@@ -68,9 +68,9 @@ function ToolCallEvents({ events }: { events: ChatMessage['events'] }) {
                 {' \u2192 '}{truncateResult(result.result)}
               </span>
             )}
-            {isExpanded && call.tool_args && (
+            {isExpanded && call.tool_args ? (
               <pre className="adk-event-args">{JSON.stringify(call.tool_args, null, 2)}</pre>
-            )}
+            ) : null}
           </div>
         )
       })}
