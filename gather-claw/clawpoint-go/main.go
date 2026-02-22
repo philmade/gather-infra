@@ -4,8 +4,11 @@ import (
 	"context"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"clawpoint-go/core"
+	"clawpoint-go/core/connectors"
 	"clawpoint-go/extensions"
 
 	"google.golang.org/adk/agent"
@@ -41,6 +44,27 @@ func main() {
 	// and heartbeat injection restores continuity on restart.
 	sessionService := session.InMemoryService()
 	log.Printf("Session storage: in-memory")
+
+	// Handle graceful shutdown
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigChan
+		log.Printf("Shutting down...")
+		cancel()
+	}()
+
+	// Start internal heartbeat goroutine — waits for ADK server to be ready,
+	// then sends periodic [HEARTBEAT] messages through the middleware pipeline.
+	// Uses the same port as the ADK server (default 8080, or ADK_PORT env var).
+	adkPort := os.Getenv("ADK_PORT")
+	if adkPort == "" {
+		adkPort = "8080"
+	}
+	hb := connectors.NewInternalHeartbeat("http://127.0.0.1:" + adkPort)
+	go hb.Start(ctx)
 
 	// Run with ADK launcher
 	config := &launcher.Config{
