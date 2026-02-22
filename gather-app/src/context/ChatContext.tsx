@@ -2,7 +2,7 @@ import { createContext, useContext, useReducer, useEffect, useCallback, useRef, 
 import { useAuth } from './AuthContext'
 import { pb } from '../lib/pocketbase'
 import { TinodeClient, type ChatMessage, type ChannelInfo, type WorkspaceInfo } from '../lib/tinode'
-import { getClawMessages, sendClawMessage as apiSendClawMessage } from '../lib/api'
+import { getClawMessages, sendClawMessage as apiSendClawMessage, streamClawMessage } from '../lib/api'
 
 interface ChatState {
   connected: boolean
@@ -15,6 +15,7 @@ interface ChatState {
   clawName: string | null       // display name of the active claw
   clawMessages: ChatMessage[]   // messages from claw REST API
   clawTyping: boolean           // true while waiting for claw LLM response
+  streamingMessage: ChatMessage | null // live streaming message (events arrive incrementally)
   error: string | null
 }
 
@@ -28,6 +29,9 @@ type ChatAction =
   | { type: 'SET_CLAW_TOPIC'; clawId: string; clawName: string; messages: ChatMessage[] }
   | { type: 'ADD_CLAW_MESSAGE'; message: ChatMessage }
   | { type: 'SET_CLAW_TYPING'; typing: boolean }
+  | { type: 'SET_STREAMING_MESSAGE'; message: ChatMessage }
+  | { type: 'ADD_STREAMING_EVENT'; event: ChatMessage['events'] extends (infer E)[] | undefined ? E : never }
+  | { type: 'FINISH_STREAMING'; text: string; messageId: string; userMessageId: string }
   | { type: 'CLEAR_CLAW' }
   | { type: 'SET_ERROR'; error: string }
   | { type: 'RESET' }
@@ -55,8 +59,32 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
       return { ...state, clawMessages: [...state.clawMessages, action.message] }
     case 'SET_CLAW_TYPING':
       return { ...state, clawTyping: action.typing }
+    case 'SET_STREAMING_MESSAGE':
+      return { ...state, streamingMessage: action.message, clawTyping: true }
+    case 'ADD_STREAMING_EVENT':
+      if (!state.streamingMessage) return state
+      return {
+        ...state,
+        streamingMessage: {
+          ...state.streamingMessage,
+          events: [...(state.streamingMessage.events || []), action.event],
+        },
+      }
+    case 'FINISH_STREAMING': {
+      if (!state.streamingMessage) return { ...state, clawTyping: false }
+      const finalMsg: ChatMessage = {
+        ...state.streamingMessage,
+        content: action.text,
+      }
+      return {
+        ...state,
+        streamingMessage: null,
+        clawTyping: false,
+        clawMessages: [...state.clawMessages, finalMsg],
+      }
+    }
     case 'CLEAR_CLAW':
-      return { ...state, clawTopic: null, clawName: null, clawMessages: [], clawTyping: false }
+      return { ...state, clawTopic: null, clawName: null, clawMessages: [], clawTyping: false, streamingMessage: null }
     case 'SET_ERROR':
       return { ...state, error: action.error }
     case 'RESET':
@@ -75,6 +103,7 @@ const initialState: ChatState = {
   clawName: null,
   clawMessages: [],
   clawTyping: false,
+  streamingMessage: null,
   error: null,
 }
 
@@ -281,6 +310,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const sendMessage = useCallback(async (text: string) => {
     // Route to claw REST if a claw topic is active
     if (clawIdRef.current && state.clawTopic) {
+      const clawId = clawIdRef.current
+      const topic = state.clawTopic
+
       // Show user's message immediately (optimistic)
       const userMsg: ChatMessage = {
         seq: Date.now(),
@@ -288,30 +320,74 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         content: text,
         ts: new Date().toISOString(),
         isOwn: true,
-        topic: state.clawTopic,
+        topic,
       }
       dispatch({ type: 'ADD_CLAW_MESSAGE', message: userMsg })
-      dispatch({ type: 'SET_CLAW_TYPING', typing: true })
+
+      // Create streaming placeholder
+      const streamMsg: ChatMessage = {
+        seq: Date.now() + 1,
+        from: state.clawName || clawId,
+        content: '',
+        ts: new Date().toISOString(),
+        isOwn: false,
+        topic,
+        events: [],
+      }
+      dispatch({ type: 'SET_STREAMING_MESSAGE', message: streamMsg })
 
       try {
-        const data = await apiSendClawMessage(clawIdRef.current, text)
-        // Mark both user message and claw reply as seen so poll doesn't duplicate
-        if (data.user_message_id) clawSeenIdsRef.current.add(data.user_message_id)
-        clawSeenIdsRef.current.add(data.message.id)
-        const clawReply: ChatMessage = {
-          seq: Date.now() + 1,
-          from: data.message.author_name,
-          content: data.message.body,
-          ts: data.message.created,
-          isOwn: false,
-          topic: state.clawTopic,
-          events: data.events,
+        for await (const evt of streamClawMessage(clawId, text)) {
+          // Bail if user switched away from this claw
+          if (clawIdRef.current !== clawId) break
+
+          switch (evt.type) {
+            case 'tool_call':
+            case 'tool_result':
+            case 'text':
+              dispatch({
+                type: 'ADD_STREAMING_EVENT',
+                event: {
+                  type: evt.type,
+                  author: evt.author,
+                  text: evt.text,
+                  tool_name: evt.tool_name,
+                  tool_id: evt.tool_id,
+                  tool_args: evt.tool_args,
+                  result: evt.result,
+                },
+              })
+              break
+            case 'done':
+              // Final event with message IDs — finalize
+              if (evt.user_message_id) clawSeenIdsRef.current.add(evt.user_message_id)
+              if (evt.message_id) clawSeenIdsRef.current.add(evt.message_id)
+              break
+            case 'end':
+              // End event carries final text
+              dispatch({ type: 'FINISH_STREAMING', text: evt.text || '', messageId: '', userMessageId: '' })
+              break
+            case 'error':
+              console.warn('[Chat] Stream error:', evt.text)
+              dispatch({ type: 'FINISH_STREAMING', text: evt.text || 'Error occurred', messageId: '', userMessageId: '' })
+              break
+          }
         }
-        dispatch({ type: 'SET_CLAW_TYPING', typing: false })
-        dispatch({ type: 'ADD_CLAW_MESSAGE', message: clawReply })
+
+        // If stream ended without an explicit FINISH_STREAMING (edge case), clean up
+        // The reducer is idempotent — finishing when already finished is a no-op
       } catch (err) {
-        console.warn('[Chat] Failed to send claw message:', err)
-        dispatch({ type: 'SET_CLAW_TYPING', typing: false })
+        console.warn('[Chat] Stream failed, falling back to sync:', err)
+        // Fallback to sync API
+        try {
+          const data = await apiSendClawMessage(clawId, text)
+          if (data.user_message_id) clawSeenIdsRef.current.add(data.user_message_id)
+          clawSeenIdsRef.current.add(data.message.id)
+          dispatch({ type: 'FINISH_STREAMING', text: data.message.body, messageId: data.message.id, userMessageId: data.user_message_id })
+        } catch (fallbackErr) {
+          console.warn('[Chat] Sync fallback also failed:', fallbackErr)
+          dispatch({ type: 'FINISH_STREAMING', text: 'Failed to get response', messageId: '', userMessageId: '' })
+        }
       }
       return
     }
@@ -319,7 +395,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     const client = clientRef.current
     if (!client?.isLoggedIn) return
     await client.sendMessage(text)
-  }, [state.clawTopic])
+  }, [state.clawTopic, state.clawName])
 
   const getUserName = useCallback((userId: string) => {
     return clientRef.current?.getUserName(userId) ?? userId

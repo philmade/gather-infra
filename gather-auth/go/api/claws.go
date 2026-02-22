@@ -2,6 +2,7 @@ package api
 
 import (
 	"archive/tar"
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -877,6 +878,172 @@ func sendToADK(containerName, userID, text string) (*bridgeResponse, error) {
 	}
 
 	return &result, nil
+}
+
+// sendToADKStream forwards a user message to the claw's bridge middleware via SSE streaming.
+// Returns the response body for streaming. Caller must close the body.
+func sendToADKStream(containerName, userID, text string) (*http.Response, error) {
+	base := fmt.Sprintf("http://%s:8080", containerName)
+
+	body, _ := json.Marshal(bridgeRequest{
+		UserID:   userID,
+		Username: userID,
+		Text:     text,
+		Protocol: "gather-ui",
+	})
+
+	streamClient := &http.Client{Timeout: 300 * time.Second}
+	resp, err := streamClient.Post(base+"/msg/stream", "application/json", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("bridge stream request failed: %w", err)
+	}
+
+	if resp.StatusCode != 200 {
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("bridge stream returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	return resp, nil
+}
+
+// HandleClawStream returns an HTTP handler that streams SSE events from a claw.
+// This is a raw PocketBase route (not Huma) because Huma doesn't support SSE.
+func HandleClawStream(app *pocketbase.PocketBase) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+
+		// Auth + ownership check
+		authHeader := r.Header.Get("Authorization")
+		userID, err := extractPBUserID(app, authHeader)
+		if err != nil {
+			http.Error(w, `{"error":"Authentication required"}`, http.StatusUnauthorized)
+			return
+		}
+
+		// Extract claw ID from path: /api/claws/{id}/messages/stream
+		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/claws/"), "/")
+		if len(parts) < 1 || parts[0] == "" {
+			http.Error(w, `{"error":"Missing claw ID"}`, http.StatusBadRequest)
+			return
+		}
+		clawID := parts[0]
+
+		record, err := app.FindRecordById("claw_deployments", clawID)
+		if err != nil || record.GetString("user_id") != userID {
+			http.Error(w, `{"error":"Claw not found"}`, http.StatusNotFound)
+			return
+		}
+
+		agentID := record.GetString("agent_id")
+		channelID, err := findClawChannel(app, agentID)
+		if err != nil {
+			http.Error(w, `{"error":"Claw channel not found"}`, http.StatusNotFound)
+			return
+		}
+
+		// Parse request body
+		var reqBody struct {
+			Body string `json:"body"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil || reqBody.Body == "" {
+			http.Error(w, `{"error":"body is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		containerID := record.GetString("container_id")
+		if containerID == "" {
+			http.Error(w, `{"error":"Claw container not running"}`, http.StatusUnprocessableEntity)
+			return
+		}
+
+		// Save user's message
+		col, err := app.FindCollectionByNameOrId("channel_messages")
+		if err != nil {
+			http.Error(w, `{"error":"channel_messages collection not found"}`, http.StatusInternalServerError)
+			return
+		}
+
+		userAuthorID := "user:" + userID
+		msgRec := core.NewRecord(col)
+		msgRec.Set("channel_id", channelID)
+		msgRec.Set("author_id", userAuthorID)
+		msgRec.Set("body", reqBody.Body)
+		if err := app.Save(msgRec); err != nil {
+			http.Error(w, `{"error":"Failed to save message"}`, http.StatusInternalServerError)
+			return
+		}
+
+		// Stream from bridge
+		bridgeResp, err := sendToADKStream(containerID, userID, reqBody.Body)
+		if err != nil {
+			app.Logger().Error("ADK stream proxy failed", "claw", containerID, "error", err)
+			http.Error(w, fmt.Sprintf(`{"error":"Claw did not respond: %v"}`, err), http.StatusBadGateway)
+			return
+		}
+		defer bridgeResp.Body.Close()
+
+		// Set SSE headers
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
+			return
+		}
+
+		// Stream bridge events to frontend, track last text for DB save
+		var lastText string
+		scanner := bufio.NewScanner(bridgeResp.Body)
+		for scanner.Scan() {
+			line := scanner.Text()
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+
+			data := line[6:]
+
+			// Parse to track lastText from "end" event
+			var evt map[string]any
+			if err := json.Unmarshal([]byte(data), &evt); err == nil {
+				if evtType, _ := evt["type"].(string); evtType == "end" {
+					if t, _ := evt["text"].(string); t != "" {
+						lastText = t
+					}
+				}
+			}
+
+			// Forward the SSE event
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		}
+
+		// Save claw reply to DB
+		if lastText != "" {
+			replyRec := core.NewRecord(col)
+			replyRec.Set("channel_id", channelID)
+			replyRec.Set("author_id", agentID)
+			replyRec.Set("body", lastText)
+			if err := app.Save(replyRec); err != nil {
+				app.Logger().Error("Failed to save streamed claw reply", "claw", containerID, "error", err)
+			}
+
+			// Send final "done" event with message IDs
+			doneEvt, _ := json.Marshal(map[string]string{
+				"type":            "done",
+				"message_id":      replyRec.Id,
+				"user_message_id": msgRec.Id,
+			})
+			fmt.Fprintf(w, "data: %s\n\n", doneEvt)
+			flusher.Flush()
+		}
+	}
 }
 
 // extractPBUserID parses a PocketBase auth token and returns the user ID.

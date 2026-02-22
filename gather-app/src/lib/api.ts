@@ -155,6 +155,64 @@ export function sendClawMessage(clawId: string, body: string) {
   return apiPost<{ message: ClawMessage; user_message_id: string; events?: ADKEvent[] }>(`/api/claws/${encodeURIComponent(clawId)}/messages`, { body })
 }
 
+// SSE streaming event from the bridge
+export interface StreamEvent {
+  type: 'text' | 'tool_call' | 'tool_result' | 'end' | 'done' | 'error'
+  author?: string
+  text?: string
+  tool_name?: string
+  tool_id?: string
+  tool_args?: unknown
+  result?: unknown
+  message_id?: string
+  user_message_id?: string
+}
+
+// Stream claw message via SSE — yields events as they arrive from the agent.
+export async function* streamClawMessage(clawId: string, body: string): AsyncGenerator<StreamEvent> {
+  const resp = await fetch(`${baseUrl}/api/claws/${encodeURIComponent(clawId)}/messages/stream`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ body }),
+  })
+
+  if (!resp.ok) {
+    const text = await resp.text()
+    throw new Error(`Stream failed: HTTP ${resp.status}: ${text.substring(0, 200)}`)
+  }
+
+  const reader = resp.body!.getReader()
+  const decoder = new TextDecoder()
+  let buffer = ''
+
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+
+    // Parse SSE events from buffer
+    const lines = buffer.split('\n')
+    buffer = lines.pop() || '' // keep incomplete last line
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const data = line.slice(6)
+      try {
+        const evt: StreamEvent = JSON.parse(data)
+        yield evt
+      } catch { /* skip unparseable */ }
+    }
+  }
+
+  // Process any remaining data in buffer
+  if (buffer.startsWith('data: ')) {
+    try {
+      yield JSON.parse(buffer.slice(6))
+    } catch { /* skip */ }
+  }
+}
+
 // Claw environment / config
 export function getClawEnv(id: string) {
   return apiFetch<{ vars: Record<string, string> }>(`/api/claws/${encodeURIComponent(id)}/env`)

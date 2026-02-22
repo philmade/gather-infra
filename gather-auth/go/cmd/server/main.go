@@ -177,6 +177,12 @@ func main() {
 			return nil
 		})
 
+		// --- Claw SSE streaming (raw route, not Huma — SSE not supported by Huma) ---
+		e.Router.POST("/api/claws/{id}/messages/stream", func(re *core.RequestEvent) error {
+			gatherapi.HandleClawStream(app).ServeHTTP(re.Response, re.Request)
+			return nil
+		})
+
 		// --- PocketBase-native routes (require PocketBase auth middleware) ---
 
 		e.Router.GET("/api/tinode/credentials", func(re *core.RequestEvent) error {

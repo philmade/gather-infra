@@ -10,12 +10,12 @@ export default function MessageList() {
   const { state: chatState } = useChat()
   const ref = useRef<HTMLDivElement>(null)
 
-  // Scroll to bottom on channel switch or new messages
+  // Scroll to bottom on channel switch or new messages or streaming updates
   useEffect(() => {
     if (ref.current) {
       ref.current.scrollTop = ref.current.scrollHeight
     }
-  }, [state.activeChannel, chatState.messages.length, chatState.clawMessages.length])
+  }, [state.activeChannel, chatState.messages.length, chatState.clawMessages.length, chatState.streamingMessage?.events?.length])
 
   // Claw REST channel view
   if (chatState.clawTopic) {
@@ -24,7 +24,10 @@ export default function MessageList() {
         {chatState.clawMessages.map(msg => (
           <LiveMessage key={`${msg.ts}-${msg.seq}`} msg={msg} />
         ))}
-        {chatState.clawTyping && (
+        {chatState.streamingMessage && (
+          <LiveMessage msg={chatState.streamingMessage} />
+        )}
+        {chatState.clawTyping && !chatState.streamingMessage && (
           <div className="message typing-indicator">
             <div className="message-avatar avatar-bg-3">
               {(chatState.clawName || '?').charAt(0).toUpperCase()}

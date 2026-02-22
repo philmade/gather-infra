@@ -189,6 +189,7 @@ func (m *MatterbridgeConnector) startTypingLoop(chatID string) context.CancelFun
 }
 
 // routeToADK sends a message to the ADK agent via the middleware pipeline.
+// Uses streaming to provide tool progress feedback on Telegram.
 func (m *MatterbridgeConnector) routeToADK(ctx context.Context, msg MBMessage) (string, error) {
 	userID := msg.UserID
 	if userID == "" {
@@ -205,8 +206,15 @@ func (m *MatterbridgeConnector) routeToADK(ctx context.Context, msg MBMessage) (
 
 	text := msg.Text
 
-	// Route through middleware (token estimation + compaction + ADK call)
-	result, err := m.middleware.ProcessMessage(ctx, userID, sessionID, text)
+	// Stream callback: send tool progress to Telegram
+	onEvent := func(evt ADKEvent) {
+		if evt.Type == "tool_call" && evt.ToolName != "" {
+			m.sendTypingIndicator(msg.Channel)
+		}
+	}
+
+	// Route through middleware with streaming (token estimation + compaction + ADK call)
+	result, err := m.middleware.ProcessMessageStream(ctx, userID, sessionID, text, onEvent)
 	if err != nil {
 		// Session lost (ADK restart / hot-swap) — invalidate cache and retry once
 		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "404") {
@@ -220,7 +228,7 @@ func (m *MatterbridgeConnector) routeToADK(ctx context.Context, msg MBMessage) (
 				return "", fmt.Errorf("retry session: %w", createErr)
 			}
 
-			result, err = m.middleware.ProcessMessage(ctx, userID, newSessionID, text)
+			result, err = m.middleware.ProcessMessageStream(ctx, userID, newSessionID, text, onEvent)
 			if err != nil {
 				return "", err
 			}
@@ -555,6 +563,104 @@ func (m *MatterbridgeConnector) ServeHTTP(ctx context.Context, addr string) erro
 
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(BridgeResponse{Text: result.Text, Events: result.Events})
+	})
+
+	mux.HandleFunc("/stream", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "POST only", http.StatusMethodNotAllowed)
+			return
+		}
+
+		var req BridgeRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+			return
+		}
+
+		if req.Text == "" {
+			http.Error(w, `{"error":"text is required"}`, http.StatusBadRequest)
+			return
+		}
+
+		userID := req.UserID
+		if userID == "" {
+			userID = req.Username
+		}
+		if userID == "" {
+			userID = "anonymous"
+		}
+
+		fmt.Printf("[%s/stream] %s: %s\n", req.Protocol, req.Username, truncateStr(req.Text, 80))
+
+		sessionID, err := m.getOrCreateSession(userID)
+		if err != nil {
+			http.Error(w, fmt.Sprintf(`{"error":"session: %v"}`, err), http.StatusInternalServerError)
+			return
+		}
+
+		// Set SSE headers
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("Connection", "keep-alive")
+		w.Header().Set("X-Accel-Buffering", "no")
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
+			return
+		}
+		flusher.Flush()
+
+		text := req.Text
+
+		// Stream callback: write each event as SSE
+		onEvent := func(evt ADKEvent) {
+			data, err := json.Marshal(evt)
+			if err != nil {
+				return
+			}
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		}
+
+		result, err := m.middleware.ProcessMessageStream(ctx, userID, sessionID, text, onEvent)
+		if err != nil {
+			// Session lost — retry once
+			if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "404") {
+				m.mu.Lock()
+				delete(m.sessions, userID)
+				m.mu.Unlock()
+
+				newSessionID, createErr := m.getOrCreateSession(userID)
+				if createErr == nil {
+					result, err = m.middleware.ProcessMessageStream(ctx, userID, newSessionID, text, onEvent)
+					if err == nil {
+						sessionID = newSessionID
+					}
+				}
+			}
+
+			if err != nil {
+				errEvt, _ := json.Marshal(map[string]string{"type": "error", "text": err.Error()})
+				fmt.Fprintf(w, "data: %s\n\n", errEvt)
+				flusher.Flush()
+				return
+			}
+		}
+
+		// Update session mapping if compaction occurred
+		if result.SessionID != sessionID {
+			m.mu.Lock()
+			m.sessions[userID] = result.SessionID
+			m.mu.Unlock()
+		}
+
+		// Send end event with final text
+		endEvt, _ := json.Marshal(map[string]string{"type": "end", "text": result.Text})
+		fmt.Fprintf(w, "data: %s\n\n", endEvt)
+		flusher.Flush()
+
+		fmt.Printf("  -> streamed %d chars\n", len(result.Text))
 	})
 
 	server := &http.Server{Addr: addr, Handler: mux}

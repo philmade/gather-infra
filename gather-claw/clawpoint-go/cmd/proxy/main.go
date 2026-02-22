@@ -42,7 +42,17 @@ func main() {
 	// Reverse proxy for /msg → bridge middleware
 	bridgeProxy := httputil.NewSingleHostReverseProxy(bridgeURL)
 
+	// Streaming proxy with immediate flush for SSE
+	streamBridgeProxy := httputil.NewSingleHostReverseProxy(bridgeURL)
+	streamBridgeProxy.FlushInterval = -1 // flush immediately for SSE
+
 	mux := http.NewServeMux()
+
+	// /msg/stream → bridge /stream (SSE streaming pipeline)
+	mux.HandleFunc("/msg/stream", func(w http.ResponseWriter, r *http.Request) {
+		r.URL.Path = "/stream"
+		streamBridgeProxy.ServeHTTP(w, r)
+	})
 
 	// /msg → bridge middleware (unified message pipeline)
 	mux.HandleFunc("/msg", func(w http.ResponseWriter, r *http.Request) {
