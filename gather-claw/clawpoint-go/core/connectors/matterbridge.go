@@ -206,7 +206,26 @@ func (m *MatterbridgeConnector) routeToADK(ctx context.Context, msg MBMessage) (
 	// Route through middleware (token estimation + compaction + ADK call)
 	result, err := m.middleware.ProcessMessage(ctx, userID, sessionID, text)
 	if err != nil {
-		return "", err
+		// Session lost (ADK restart / hot-swap) — invalidate cache and retry once
+		if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "404") {
+			fmt.Printf("  session %s lost, creating new one\n", truncateStr(sessionID, 8))
+			m.mu.Lock()
+			delete(m.sessions, userID)
+			m.mu.Unlock()
+
+			newSessionID, createErr := m.getOrCreateSession(userID)
+			if createErr != nil {
+				return "", fmt.Errorf("retry session: %w", createErr)
+			}
+
+			result, err = m.middleware.ProcessMessage(ctx, userID, newSessionID, text)
+			if err != nil {
+				return "", err
+			}
+			sessionID = newSessionID
+		} else {
+			return "", err
+		}
 	}
 
 	// If middleware compacted and created a new session, update our mapping
@@ -384,17 +403,35 @@ func (m *MatterbridgeConnector) ServeHTTP(ctx context.Context, addr string) erro
 		// Route through middleware (token estimation + compaction + ADK call)
 		result, err := m.middleware.ProcessMessage(ctx, userID, sessionID, text)
 		if err != nil {
-			fmt.Printf("  error: %v\n", err)
-			// Return friendly error as a normal message so the UI displays it
-			if friendly := friendlyError(err); friendly != "" {
+			// Session lost (ADK restart / hot-swap) — invalidate cache and retry once
+			if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "404") {
+				fmt.Printf("  session %s lost, creating new one\n", truncateStr(sessionID, 8))
+				m.mu.Lock()
+				delete(m.sessions, userID)
+				m.mu.Unlock()
+
+				newSessionID, createErr := m.getOrCreateSession(userID)
+				if createErr == nil {
+					result, err = m.middleware.ProcessMessage(ctx, userID, newSessionID, text)
+					if err == nil {
+						sessionID = newSessionID
+					}
+				}
+			}
+
+			// If still erroring after retry
+			if err != nil {
+				fmt.Printf("  error: %v\n", err)
+				if friendly := friendlyError(err); friendly != "" {
+					w.Header().Set("Content-Type", "application/json")
+					json.NewEncoder(w).Encode(BridgeResponse{Text: friendly})
+					return
+				}
 				w.Header().Set("Content-Type", "application/json")
-				json.NewEncoder(w).Encode(BridgeResponse{Text: friendly})
+				w.WriteHeader(http.StatusBadGateway)
+				json.NewEncoder(w).Encode(BridgeResponse{Error: fmt.Sprintf("adk: %v", err)})
 				return
 			}
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadGateway)
-			json.NewEncoder(w).Encode(BridgeResponse{Error: fmt.Sprintf("adk: %v", err)})
-			return
 		}
 
 		// Update session mapping if compaction occurred
