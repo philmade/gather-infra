@@ -459,8 +459,9 @@ type BridgeRequest struct {
 
 // BridgeResponse is the JSON response from the bridge HTTP server.
 type BridgeResponse struct {
-	Text  string `json:"text"`
-	Error string `json:"error,omitempty"`
+	Text   string     `json:"text"`
+	Events []ADKEvent `json:"events,omitempty"`
+	Error  string     `json:"error,omitempty"`
 }
 
 // ServeHTTP starts an HTTP server for receiving messages from external sources.
@@ -553,7 +554,7 @@ func (m *MatterbridgeConnector) ServeHTTP(ctx context.Context, addr string) erro
 		fmt.Printf("  -> sent %d chars\n", len(result.Text))
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(BridgeResponse{Text: result.Text})
+		json.NewEncoder(w).Encode(BridgeResponse{Text: result.Text, Events: result.Events})
 	})
 
 	server := &http.Server{Addr: addr, Handler: mux}

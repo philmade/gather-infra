@@ -62,7 +62,7 @@ func sendHeartbeat(app *pocketbase.PocketBase, r *core.Record, now time.Time) {
 		msg += " " + instruction
 	}
 
-	reply, err := sendToADK(containerID, "heartbeat", msg)
+	result, err := sendToADK(containerID, "heartbeat", msg)
 	if err != nil {
 		app.Logger().Warn("Heartbeat failed",
 			"claw", clawName, "container", containerID, "error", err)
@@ -71,6 +71,8 @@ func sendHeartbeat(app *pocketbase.PocketBase, r *core.Record, now time.Time) {
 		app.Save(r)
 		return
 	}
+
+	reply := result.Text
 
 	// Save reply as channel message (suppress HEARTBEAT_OK idle signals)
 	channelID, err := findClawChannel(app, agentID)

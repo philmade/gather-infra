@@ -61,11 +61,23 @@ const (
 	compactionThreshold = 115200
 )
 
+// ADKEvent represents a single event from the ADK SSE stream (text chunk, tool call, or tool result).
+type ADKEvent struct {
+	Type     string `json:"type"`                // "text", "tool_call", "tool_result"
+	Author   string `json:"author,omitempty"`     // agent that produced this event
+	Text     string `json:"text,omitempty"`       // for type=text
+	ToolName string `json:"tool_name,omitempty"`  // for type=tool_call / tool_result
+	ToolID   string `json:"tool_id,omitempty"`    // for tool_call + tool_result
+	ToolArgs any    `json:"tool_args,omitempty"`  // for type=tool_call
+	Result   any    `json:"result,omitempty"`     // for type=tool_result
+}
+
 // ProcessResult holds the response text and the session ID that was used.
 // If compaction occurred, SessionID will differ from the input session ID.
 type ProcessResult struct {
 	Text      string
-	SessionID string // The session ID used (may differ from input if compacted)
+	SessionID string     // The session ID used (may differ from input if compacted)
+	Events    []ADKEvent // Captured ADK events (tool calls, tool results, text chunks)
 }
 
 // ProcessMessage is the unified middleware pipeline:
@@ -104,7 +116,7 @@ func (mw *Middleware) ProcessMessage(ctx context.Context, userID, sessionID, tex
 		}
 	}
 
-	response, err := mw.sendRunSSE(ctx, userID, sessionID, text)
+	response, events, err := mw.sendRunSSE(ctx, userID, sessionID, text)
 	if err != nil {
 		return nil, err
 	}
@@ -116,7 +128,7 @@ func (mw *Middleware) ProcessMessage(ctx context.Context, userID, sessionID, tex
 		return &ProcessResult{Text: "HEARTBEAT_OK", SessionID: sessionID}, nil
 	}
 
-	return &ProcessResult{Text: response, SessionID: sessionID}, nil
+	return &ProcessResult{Text: response, SessionID: sessionID, Events: events}, nil
 }
 
 // isHeartbeatOK checks if the agent's response is a HEARTBEAT_OK idle signal.
@@ -768,9 +780,8 @@ func (mw *Middleware) createSessionWithSummary(userID, summary string) (string, 
 	return sessionID, nil
 }
 
-// sendRunSSE forwards a message to ADK via run_sse and returns the response text.
-// This is the same as MatterbridgeConnector.sendRunSSE but on the middleware struct.
-func (mw *Middleware) sendRunSSE(ctx context.Context, userID, sessionID, text string) (string, error) {
+// sendRunSSE forwards a message to ADK via run_sse and returns the response text + captured events.
+func (mw *Middleware) sendRunSSE(ctx context.Context, userID, sessionID, text string) (string, []ADKEvent, error) {
 	payload := map[string]any{
 		"appName":   mw.appName,
 		"userId":    userID,
@@ -787,7 +798,7 @@ func (mw *Middleware) sendRunSSE(ctx context.Context, userID, sessionID, text st
 
 	req, err := http.NewRequestWithContext(ctx, "POST", mw.adkURL+"/api/run_sse", bytes.NewReader(jsonPayload))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
@@ -795,28 +806,36 @@ func (mw *Middleware) sendRunSSE(ctx context.Context, userID, sessionID, text st
 	client := &http.Client{Timeout: 300 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
 		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("run_sse HTTP %d: %s", resp.StatusCode, string(body))
+		return "", nil, fmt.Errorf("run_sse HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	return parseSSEResponse(resp.Body)
+	return parseSSEResponseFull(resp.Body)
 }
 
 // parseSSEResponse reads SSE events and extracts the agent's text response.
 func parseSSEResponse(r io.Reader) (string, error) {
+	text, _, err := parseSSEResponseFull(r)
+	return text, err
+}
+
+// parseSSEResponseFull reads SSE events and extracts the agent's text response
+// plus all ADK events (tool calls, tool results, text chunks).
+func parseSSEResponseFull(r io.Reader) (string, []ADKEvent, error) {
 	scanner := bufio.NewScanner(r)
 	var lastText string
+	var events []ADKEvent
 
 	for scanner.Scan() {
 		line := scanner.Text()
 
 		if strings.HasPrefix(line, "Error while running agent:") {
-			return "", fmt.Errorf("%s", line)
+			return "", nil, fmt.Errorf("%s", line)
 		}
 
 		if !strings.HasPrefix(line, "data: ") {
@@ -828,6 +847,8 @@ func parseSSEResponse(r io.Reader) (string, error) {
 		if err := json.Unmarshal([]byte(data), &event); err != nil {
 			continue
 		}
+
+		author, _ := event["author"].(string)
 
 		content, ok := event["content"].(map[string]any)
 		if !ok {
@@ -844,13 +865,48 @@ func parseSSEResponse(r io.Reader) (string, error) {
 			if !ok {
 				continue
 			}
+
+			// Text part
 			if text, ok := part["text"].(string); ok && text != "" {
 				lastText = text
+				events = append(events, ADKEvent{
+					Type:   "text",
+					Author: author,
+					Text:   text,
+				})
+			}
+
+			// Function call
+			if fc, ok := part["functionCall"].(map[string]any); ok {
+				name, _ := fc["name"].(string)
+				id, _ := fc["id"].(string)
+				args := fc["args"]
+				events = append(events, ADKEvent{
+					Type:     "tool_call",
+					Author:   author,
+					ToolName: name,
+					ToolID:   id,
+					ToolArgs: args,
+				})
+			}
+
+			// Function response
+			if fr, ok := part["functionResponse"].(map[string]any); ok {
+				name, _ := fr["name"].(string)
+				id, _ := fr["id"].(string)
+				result := fr["response"]
+				events = append(events, ADKEvent{
+					Type:     "tool_result",
+					Author:   author,
+					ToolName: name,
+					ToolID:   id,
+					Result:   result,
+				})
 			}
 		}
 	}
 
-	return lastText, nil
+	return lastText, events, nil
 }
 
 func truncSID(s string) string {

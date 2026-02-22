@@ -184,6 +184,7 @@ type SendClawMsgOutput struct {
 	Body struct {
 		Message       ClawMessage `json:"message"`
 		UserMessageID string      `json:"user_message_id"`
+		Events        []adkEvent  `json:"events,omitempty"`
 	}
 }
 
@@ -608,17 +609,17 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 			return nil, huma.Error422UnprocessableEntity("Claw container not running")
 		}
 
-		adkReply, err := sendToADK(containerID, userID, input.Body.Body)
+		adkResult, err := sendToADK(containerID, userID, input.Body.Body)
 		if err != nil {
 			app.Logger().Error("ADK proxy failed", "claw", containerID, "error", err)
 			return nil, huma.NewError(http.StatusBadGateway, fmt.Sprintf("Claw did not respond: %v", err))
 		}
 
-		// Save the claw's response as a channel message
+		// Save the claw's response as a channel message (text only, events are ephemeral)
 		replyRec := core.NewRecord(col)
 		replyRec.Set("channel_id", channelID)
 		replyRec.Set("author_id", agentID)
-		replyRec.Set("body", adkReply)
+		replyRec.Set("body", adkResult.Text)
 		if err := app.Save(replyRec); err != nil {
 			app.Logger().Error("Failed to save claw reply", "claw", containerID, "error", err)
 		}
@@ -626,11 +627,12 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 		// Return the claw's reply + user message ID (so frontend can de-dupe polls)
 		out := &SendClawMsgOutput{}
 		out.Body.UserMessageID = msgRec.Id
+		out.Body.Events = adkResult.Events
 		out.Body.Message = ClawMessage{
 			ID:         replyRec.Id,
 			AuthorID:   agentID,
 			AuthorName: resolveAuthorName(app, agentID),
-			Body:       adkReply,
+			Body:       adkResult.Text,
 			Created:    replyRec.GetString("created"),
 		}
 		return out, nil
@@ -814,17 +816,29 @@ type bridgeRequest struct {
 	Protocol string `json:"protocol"`
 }
 
+// adkEvent represents a single event from the ADK SSE stream.
+type adkEvent struct {
+	Type     string `json:"type"`                // "text", "tool_call", "tool_result"
+	Author   string `json:"author,omitempty"`
+	Text     string `json:"text,omitempty"`
+	ToolName string `json:"tool_name,omitempty"`
+	ToolID   string `json:"tool_id,omitempty"`
+	ToolArgs any    `json:"tool_args,omitempty"`
+	Result   any    `json:"result,omitempty"`
+}
+
 // bridgeResponse is the JSON response from the bridge.
 type bridgeResponse struct {
-	Text  string `json:"text"`
-	Error string `json:"error,omitempty"`
+	Text   string     `json:"text"`
+	Events []adkEvent `json:"events,omitempty"`
+	Error  string     `json:"error,omitempty"`
 }
 
 var adkClient = &http.Client{Timeout: 120 * time.Second}
 
-// sendToADK forwards a user message to the claw's bridge middleware and returns the agent's text response.
+// sendToADK forwards a user message to the claw's bridge middleware and returns the bridge response.
 // The bridge handles session management, token estimation, and compaction.
-func sendToADK(containerName, userID, text string) (string, error) {
+func sendToADK(containerName, userID, text string) (*bridgeResponse, error) {
 	base := fmt.Sprintf("http://%s:8080", containerName)
 
 	body, _ := json.Marshal(bridgeRequest{
@@ -836,33 +850,33 @@ func sendToADK(containerName, userID, text string) (string, error) {
 
 	resp, err := adkClient.Post(base+"/msg", "application/json", bytes.NewReader(body))
 	if err != nil {
-		return "", fmt.Errorf("bridge request failed: %w", err)
+		return nil, fmt.Errorf("bridge request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("bridge response read failed: %w", err)
+		return nil, fmt.Errorf("bridge response read failed: %w", err)
 	}
 
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("bridge returned %d: %s", resp.StatusCode, string(respBody))
+		return nil, fmt.Errorf("bridge returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result bridgeResponse
 	if err := json.Unmarshal(respBody, &result); err != nil {
-		return "", fmt.Errorf("bridge response parse failed: %w", err)
+		return nil, fmt.Errorf("bridge response parse failed: %w", err)
 	}
 
 	if result.Error != "" {
-		return "", fmt.Errorf("bridge error: %s", result.Error)
+		return nil, fmt.Errorf("bridge error: %s", result.Error)
 	}
 
 	if result.Text == "" {
-		return "", fmt.Errorf("no response from agent")
+		return nil, fmt.Errorf("no response from agent")
 	}
 
-	return result.Text, nil
+	return &result, nil
 }
 
 // extractPBUserID parses a PocketBase auth token and returns the user ID.

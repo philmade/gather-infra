@@ -19,6 +19,15 @@ export interface ChatMessage {
   ts: string
   isOwn: boolean
   topic: string
+  events?: Array<{
+    type: 'text' | 'tool_call' | 'tool_result'
+    author?: string
+    text?: string
+    tool_name?: string
+    tool_id?: string
+    tool_args?: unknown
+    result?: unknown
+  }>
 }
 
 export interface ChannelInfo {

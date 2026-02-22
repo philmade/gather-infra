@@ -126,6 +126,16 @@ export function updateClawSettings(id: string, settings: {
 }
 
 // Claw messaging
+export interface ADKEvent {
+  type: 'text' | 'tool_call' | 'tool_result'
+  author?: string
+  text?: string
+  tool_name?: string
+  tool_id?: string
+  tool_args?: unknown
+  result?: unknown
+}
+
 export interface ClawMessage {
   id: string
   author_id: string
@@ -142,7 +152,7 @@ export function getClawMessages(clawId: string, since?: string) {
 }
 
 export function sendClawMessage(clawId: string, body: string) {
-  return apiPost<{ message: ClawMessage; user_message_id: string }>(`/api/claws/${encodeURIComponent(clawId)}/messages`, { body })
+  return apiPost<{ message: ClawMessage; user_message_id: string; events?: ADKEvent[] }>(`/api/claws/${encodeURIComponent(clawId)}/messages`, { body })
 }
 
 // Claw environment / config
