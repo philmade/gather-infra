@@ -373,7 +373,7 @@ func (m *MatterbridgeConnector) StartHeartbeat(ctx context.Context) {
 			}
 
 			// Suppress HEARTBEAT_OK and empty responses — don't relay to Telegram
-			if response == "HEARTBEAT_OK" || strings.TrimSpace(response) == "" {
+			if isHeartbeatOK(response) || strings.TrimSpace(response) == "" {
 				timer.Reset(interval)
 				continue
 			}

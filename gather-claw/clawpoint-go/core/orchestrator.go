@@ -43,6 +43,12 @@ func BuildOrchestrator(ctx context.Context, cfg OrchestratorConfig) (agent.Agent
 
 	soul := tools.NewSoulTool()
 
+	taskTool, err := tools.NewTaskTool(memTool.DB())
+	if err != nil {
+		cleanup()
+		return nil, nil, fmt.Errorf("task tool: %w", err)
+	}
+
 	// Build sub-agents (claude + research only)
 	subAgents, err := buildSubAgents(llm)
 	if err != nil {
@@ -53,8 +59,8 @@ func BuildOrchestrator(ctx context.Context, cfg OrchestratorConfig) (agent.Agent
 	// Add extension agents
 	subAgents = append(subAgents, cfg.ExtensionAgents...)
 
-	// Build coordinator tools (memory + soul + build + extensions + platform)
-	coordinatorTools, err := buildCoordinatorTools(memTool, soul)
+	// Build coordinator tools (memory + soul + tasks + build + extensions + platform)
+	coordinatorTools, err := buildCoordinatorTools(memTool, soul, taskTool)
 	if err != nil {
 		cleanup()
 		return nil, nil, fmt.Errorf("coordinator tools: %w", err)
@@ -102,10 +108,10 @@ func buildSubAgents(llm model.LLM) ([]agent.Agent, error) {
 	return []agent.Agent{claudeAgent, researchAgent}, nil
 }
 
-func buildCoordinatorTools(memTool *tools.MemoryTool, soul *tools.SoulTool) ([]tool.Tool, error) {
+func buildCoordinatorTools(memTool *tools.MemoryTool, soul *tools.SoulTool, taskTool *tools.TaskTool) ([]tool.Tool, error) {
 	var out []tool.Tool
 
-	// Memory and soul — promoted to coordinator level
+	// Memory, soul, and tasks — promoted to coordinator level
 	memoryTool, err := tools.NewConsolidatedMemoryTool(memTool)
 	if err != nil {
 		return nil, fmt.Errorf("memory tool: %w", err)
@@ -117,6 +123,12 @@ func buildCoordinatorTools(memTool *tools.MemoryTool, soul *tools.SoulTool) ([]t
 		return nil, fmt.Errorf("soul tool: %w", err)
 	}
 	out = append(out, soulTool)
+
+	tasksTool, err := tools.NewConsolidatedTaskTool(taskTool)
+	if err != nil {
+		return nil, fmt.Errorf("tasks tool: %w", err)
+	}
+	out = append(out, tasksTool)
 
 	buildTools, err := tools.NewBuildTools()
 	if err != nil {
@@ -191,7 +203,7 @@ You are running ClawPoint-Go core %s inside an Alpine Linux container.
 │   ├── SOUL.md           # Core personality
 │   ├── IDENTITY.md       # Extended identity
 │   ├── USER.md           # Owner preferences
-│   └── HEARTBEAT.md      # Heartbeat-specific instructions
+│   └── HEARTBEAT.md      # Optional heartbeat notes
 ├── public/               # PERSISTENT — your website at <yourname>.gather.is
 │   ├── index.html        # Your home page
 │   ├── activity.json     # Activity log (reverse chronological)
@@ -246,6 +258,7 @@ UI, so chaining tools IS the visible work. A response with no tool calls is just
 
 - **memory**(action, ...) — persistent memory: store, recall, or search
 - **soul**(action, ...) — identity files: read or write SOUL.md, IDENTITY.md, USER.md, HEARTBEAT.md
+- **tasks**(action, ...) — structured task management: add, list, start, complete, or remove tasks
 - **build_check**() — compile all packages and return errors WITHOUT deploying. Use this to iterate on fixes.
 - **build_and_deploy**(reason) — compile your Go source and hot-swap yourself. Use build_check first!
 - **extension_list**() — list your Starlark extensions
@@ -393,42 +406,57 @@ ground truth. If memory search returns nothing, say so honestly.
 
 ---
 
+# Task Management
+
+You have a structured task system backed by SQLite. Use the **tasks** tool to manage your work.
+
+## Tasks tool actions
+
+- **tasks**(action: "add", title: "...", description?: "...", priority?: 1-5) — create a new task (default priority: 3, where 1=highest)
+- **tasks**(action: "list", status?: "pending"|"in_progress"|"completed") — list tasks (blank status = active tasks)
+- **tasks**(action: "start", id: N) — mark task as in_progress
+- **tasks**(action: "complete", id: N) — mark task as completed
+- **tasks**(action: "remove", id: N) — delete a task
+
+## How to use tasks
+
+1. When you identify work to do, create tasks with descriptive titles
+2. Before starting work, call tasks(action: "start", id: N) to mark it in_progress
+3. When done, call tasks(action: "complete", id: N)
+4. If new work emerges during a task, add new tasks for it
+5. Your task list is automatically injected into heartbeat messages — you don't need to read it manually
+
+## HEARTBEAT.md — Optional Heartbeat Notes
+
+HEARTBEAT.md is still a soul file you can read/write, but it's supplementary notes, not your task list.
+Use it for heartbeat-specific instructions or persistent notes. Your tasks live in the structured
+task system, not in HEARTBEAT.md.
+
+---
+
 # Heartbeat Protocol
 
 You receive periodic [HEARTBEAT] messages from the platform. These are your autonomy mechanism —
 the thing that keeps you working when nobody is talking to you.
 
-## HEARTBEAT.md — Your Living Task List
-
-HEARTBEAT.md is YOUR task list. You own it. Keep it short and actionable.
-
-On each heartbeat:
-1. Read HEARTBEAT.md — it's injected into the heartbeat message, but you can also read it via soul(action: "read", filename: "HEARTBEAT.md")
-2. If it has tasks, work on the highest priority one
-3. If you complete a task, update HEARTBEAT.md — remove the done task via soul(action: "write", filename: "HEARTBEAT.md", content: "...")
-4. If you discover new work, add it to HEARTBEAT.md
-5. If nothing needs attention, reply with ONLY: HEARTBEAT_OK
-
-Example HEARTBEAT.md:
-- [ ] Finish RSS parser in /app/data/extensions/rss.star
-- [ ] Write blog post about third-order trading analysis
-- [ ] Check if platform_search returns results for "feed"
-
 ## HEARTBEAT_OK — When Nothing Needs Attention
 
-If your HEARTBEAT.md is empty, you have no continuation work, and nothing needs attention:
+If you have no active tasks, no continuation work, and nothing needs attention:
 respond with ONLY the text HEARTBEAT_OK — nothing else. No explanation. No reflection.
 This saves API credits and keeps your context clean. The system will suppress
 HEARTBEAT_OK responses automatically.
 
 ## What happens when a heartbeat arrives
 
-The middleware automatically loads your latest continuation memory, recent memories,
-and your current HEARTBEAT.md, then appends them to the heartbeat message. So you receive:
+The middleware automatically loads your structured task list, HEARTBEAT.md notes,
+latest continuation memory, and recent memories, then appends them to the heartbeat
+message. So you receive:
 
     [HEARTBEAT] <instruction>
-    --- YOUR TASK LIST (HEARTBEAT.md) ---
-    <your current tasks>
+    --- YOUR TASKS ---
+    <structured task list from SQLite>
+    --- HEARTBEAT NOTES (HEARTBEAT.md) ---
+    <optional heartbeat notes>
     --- YOUR LAST SESSION ---
     <what you were doing last time>
     --- RECENT MEMORIES ---
@@ -436,14 +464,25 @@ and your current HEARTBEAT.md, then appends them to the heartbeat message. So yo
 
 ## How to handle a heartbeat
 
-1. **Check your task list.** HEARTBEAT.md tells you what you've committed to doing.
+1. **Check your task list.** It's injected automatically — look for IN PROGRESS and PENDING sections.
 2. **Read the context.** Your last session tells you where you left off.
-3. **Decide what to do.** Work a task from HEARTBEAT.md, follow the heartbeat instruction,
-   pick up where you left off, or do something new. The instruction is a suggestion, not a command.
+3. **Work the highest priority task.** Start it if not started, continue if in progress.
 4. **Take concrete action.** Write code. Edit a file. Fetch a URL. Update your blog.
    Do NOT just reflect, introspect, or talk about what you could do. Actually do something.
-5. **Update HEARTBEAT.md** — remove completed tasks, add new ones.
-6. **Store a continuation memory** — call memory(action: "store", ...) with what you did and what's next.
+5. **Mark tasks complete** when done — tasks(action: "complete", id: N).
+6. **Add new tasks** if you discover work — tasks(action: "add", title: "...").
+7. **Store a continuation memory** — call memory(action: "store", ...) with what you did and what's next.
+
+## Idle protocol — when all tasks are done
+
+When your task list is empty (or only has recently completed tasks), the heartbeat will include
+a DEFAULT DIRECTIVE telling you to find new work. Follow it:
+
+1. Recall your memory and purpose — memory(action: "recall", days: 7)
+2. Read your SOUL.md if needed — soul(action: "read", filename: "SOUL.md")
+3. Identify a useful project to work on
+4. Create tasks for it — tasks(action: "add", ...)
+5. Start working — tasks(action: "start", id: N)
 
 ## What NOT to do on heartbeat
 
@@ -452,9 +491,10 @@ and your current HEARTBEAT.md, then appends them to the heartbeat message. So yo
 - Don't enter loops of self-analysis. If you've read your SOUL.md once, you know who you are.
 - Don't describe what you *would* do. Do it.
 - Don't produce a long response when nothing needs attention. Just say HEARTBEAT_OK.
+- Don't keep reviewing the same file/task over and over. Mark it complete and move on.
 
-Good heartbeat: receive → check task list → "I have a pending RSS parser task" →
-transfer to claude → write code → test it → update HEARTBEAT.md → store continuation → done.
+Good heartbeat: receive → check task list → "Task #12 is in progress" →
+transfer to claude → write code → test it → tasks(complete, 12) → store continuation → done.
 (All of this happens in ONE turn — you chain tool calls until the task is complete or blocked.)
 
 Good idle heartbeat: receive → no tasks, no continuation work → HEARTBEAT_OK

@@ -94,6 +94,19 @@ type PlatformCallResult struct {
 	Result string `json:"result"`
 }
 
+type TaskArgs struct {
+	Action      string `json:"action" jsonschema:"Action: add, list, start, complete, remove"`
+	Title       string `json:"title,omitempty" jsonschema:"(add) Task title"`
+	Description string `json:"description,omitempty" jsonschema:"(add) Task description"`
+	Priority    int    `json:"priority,omitempty" jsonschema:"(add) Priority 1-5, default 3"`
+	ID          int64  `json:"id,omitempty" jsonschema:"(start/complete/remove) Task ID"`
+	Status      string `json:"status,omitempty" jsonschema:"(list) Filter: pending, in_progress, completed, or blank for active"`
+}
+type TaskResult struct {
+	Message string     `json:"message,omitempty"`
+	Tasks   []TaskInfo `json:"tasks,omitempty"`
+}
+
 type ExtensionListArgs struct{}
 type ExtensionListResult struct {
 	Extensions []string `json:"extensions"`
@@ -371,6 +384,73 @@ func NewExtensionTools() ([]tool.Tool, error) {
 	out = append(out, t)
 
 	return out, nil
+}
+
+// NewConsolidatedTaskTool creates a single task tool with add/list/start/complete/remove actions.
+func NewConsolidatedTaskTool(tt *TaskTool) (tool.Tool, error) {
+	return functiontool.New(
+		functiontool.Config{
+			Name:        "tasks",
+			Description: "Structured task management — add, list, start, complete, or remove tasks. Use action: 'add' (with title, description?, priority?), 'list' (with status?), 'start' (with id), 'complete' (with id), 'remove' (with id).",
+		},
+		func(ctx tool.Context, args TaskArgs) (TaskResult, error) {
+			switch args.Action {
+			case "add":
+				if args.Title == "" {
+					return TaskResult{}, fmt.Errorf("title is required for add")
+				}
+				priority := args.Priority
+				if priority == 0 {
+					priority = 3
+				}
+				id, err := tt.Add(args.Title, args.Description, priority)
+				if err != nil {
+					return TaskResult{}, err
+				}
+				return TaskResult{Message: fmt.Sprintf("Created task #%d: %s (P%d)", id, args.Title, priority)}, nil
+
+			case "list":
+				tasks, err := tt.List(args.Status)
+				if err != nil {
+					return TaskResult{}, err
+				}
+				if len(tasks) == 0 {
+					return TaskResult{Message: "No tasks found"}, nil
+				}
+				return TaskResult{Tasks: tasks, Message: fmt.Sprintf("%d task(s)", len(tasks))}, nil
+
+			case "start":
+				if args.ID == 0 {
+					return TaskResult{}, fmt.Errorf("id is required for start")
+				}
+				if err := tt.Start(args.ID); err != nil {
+					return TaskResult{}, err
+				}
+				return TaskResult{Message: fmt.Sprintf("Started task #%d", args.ID)}, nil
+
+			case "complete":
+				if args.ID == 0 {
+					return TaskResult{}, fmt.Errorf("id is required for complete")
+				}
+				if err := tt.Complete(args.ID); err != nil {
+					return TaskResult{}, err
+				}
+				return TaskResult{Message: fmt.Sprintf("Completed task #%d", args.ID)}, nil
+
+			case "remove":
+				if args.ID == 0 {
+					return TaskResult{}, fmt.Errorf("id is required for remove")
+				}
+				if err := tt.Remove(args.ID); err != nil {
+					return TaskResult{}, err
+				}
+				return TaskResult{Message: fmt.Sprintf("Removed task #%d", args.ID)}, nil
+
+			default:
+				return TaskResult{}, fmt.Errorf("unknown action %q — use add, list, start, complete, or remove", args.Action)
+			}
+		},
+	)
 }
 
 // NewPlatformTools creates platform_search and platform_call tools for the coordinator.

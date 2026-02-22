@@ -271,6 +271,11 @@ func BuildFTSQuery(keywords []string) string {
 	return strings.Join(escaped, " OR ")
 }
 
+// DB returns the underlying database connection for sharing with other tools.
+func (m *MemoryTool) DB() *sql.DB {
+	return m.db
+}
+
 // Close closes the database connection
 func (m *MemoryTool) Close() error {
 	return m.db.Close()

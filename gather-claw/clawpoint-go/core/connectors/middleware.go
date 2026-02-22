@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"clawpoint-go/core/tools"
+
 	_ "modernc.org/sqlite"
 )
 
@@ -146,15 +148,15 @@ func (mw *Middleware) processMessageInternal(ctx context.Context, userID, sessio
 }
 
 // isHeartbeatOK checks if the agent's response is a HEARTBEAT_OK idle signal.
-// Tolerates minor surrounding whitespace or punctuation.
+// Uses HasSuffix to handle agents that emit analysis text before the HEARTBEAT_OK marker.
 func isHeartbeatOK(response string) bool {
 	trimmed := strings.TrimSpace(response)
-	return trimmed == "HEARTBEAT_OK"
+	return trimmed == "HEARTBEAT_OK" || strings.HasSuffix(trimmed, "HEARTBEAT_OK")
 }
 
-// injectHeartbeatContext loads the latest continuation memory and recent highlights
-// from the memory database, and appends them to the heartbeat message so the agent
-// has continuity between heartbeat cycles.
+// injectHeartbeatContext loads the structured task list, HEARTBEAT.md notes,
+// latest continuation memory, and recent highlights from the memory database,
+// and appends them to the heartbeat message so the agent has continuity.
 func (mw *Middleware) injectHeartbeatContext(text string) string {
 	dbPath := mw.messagesDBPath
 	if dbPath == "" {
@@ -171,13 +173,16 @@ func (mw *Middleware) injectHeartbeatContext(text string) string {
 	var sb strings.Builder
 	sb.WriteString(text)
 
-	// Load HEARTBEAT.md (the agent's living task list)
+	// Load structured task list from SQLite (authoritative task tracking)
+	taskList := tools.FormatTaskListFromDB(db)
+	sb.WriteString("\n\n--- YOUR TASKS ---\n")
+	sb.WriteString(taskList)
+
+	// Load HEARTBEAT.md as supplementary notes (not the task list)
 	heartbeatMD := mw.loadHeartbeatMD()
 	if heartbeatMD != "" {
-		sb.WriteString("\n\n--- YOUR TASK LIST (HEARTBEAT.md) ---\n")
+		sb.WriteString("\n--- HEARTBEAT NOTES (HEARTBEAT.md) ---\n")
 		sb.WriteString(heartbeatMD)
-	} else {
-		sb.WriteString("\n\n--- YOUR TASK LIST (HEARTBEAT.md) ---\n(empty — no pending tasks)\n")
 	}
 
 	// Load latest continuation memory (what I was last doing)
@@ -206,7 +211,6 @@ func (mw *Middleware) injectHeartbeatContext(text string) string {
 		for rows.Next() {
 			var content string
 			if rows.Scan(&content) == nil && content != "" {
-				// Truncate long memories to keep context manageable
 				if len(content) > 500 {
 					content = content[:500] + "..."
 				}
@@ -225,7 +229,7 @@ func (mw *Middleware) injectHeartbeatContext(text string) string {
 
 	enriched := sb.String()
 	if enriched != text {
-		log.Printf("  heartbeat context: injected continuation + %d memories", 3)
+		log.Printf("  heartbeat context: injected tasks + continuation + memories")
 	}
 	return enriched
 }
