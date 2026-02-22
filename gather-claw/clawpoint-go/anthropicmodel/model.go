@@ -7,7 +7,10 @@ import (
 	"fmt"
 	"io"
 	"iter"
+	"log"
 	"net/http"
+	"strings"
+	"time"
 
 	"google.golang.org/adk/model"
 	"google.golang.org/genai"
@@ -99,6 +102,12 @@ type anthropicError struct {
 	Message string `json:"message"`
 }
 
+const (
+	maxRetries     = 3
+	initialBackoff = 2 * time.Second
+	maxBackoff     = 30 * time.Second
+)
+
 func (m *Model) generate(ctx context.Context, req *model.LLMRequest) (*model.LLMResponse, error) {
 	anthReq := m.convertRequest(req)
 
@@ -107,6 +116,42 @@ func (m *Model) generate(ctx context.Context, req *model.LLMRequest) (*model.LLM
 		return nil, fmt.Errorf("marshal request: %w", err)
 	}
 
+	var lastErr error
+	backoff := initialBackoff
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		resp, err := m.generateOnce(ctx, body)
+		if err == nil {
+			return resp, nil
+		}
+		lastErr = err
+
+		if !isRetryableError(err) {
+			return nil, err
+		}
+
+		if attempt == maxRetries {
+			break
+		}
+
+		log.Printf("anthropic: attempt %d/%d failed (%v), retrying in %s", attempt, maxRetries, err, backoff)
+
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			return nil, fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+		}
+
+		backoff *= 2
+		if backoff > maxBackoff {
+			backoff = maxBackoff
+		}
+	}
+
+	return nil, fmt.Errorf("all %d attempts failed: %w", maxRetries, lastErr)
+}
+
+func (m *Model) generateOnce(ctx context.Context, body []byte) (*model.LLMResponse, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", m.baseURL+"/v1/messages", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
@@ -117,17 +162,21 @@ func (m *Model) generate(ctx context.Context, req *model.LLMRequest) (*model.LLM
 
 	httpResp, err := m.client.Do(httpReq)
 	if err != nil {
-		return nil, fmt.Errorf("http request: %w", err)
+		return nil, &retryableError{err: fmt.Errorf("http request: %w", err)}
 	}
 	defer httpResp.Body.Close()
 
 	respBody, err := io.ReadAll(httpResp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
+		return nil, &retryableError{err: fmt.Errorf("read response: %w", err)}
 	}
 
 	if httpResp.StatusCode != 200 {
-		return nil, fmt.Errorf("anthropic API error (HTTP %d): %s", httpResp.StatusCode, string(respBody))
+		apiErr := fmt.Errorf("anthropic API error (HTTP %d): %s", httpResp.StatusCode, string(respBody))
+		if httpResp.StatusCode == 429 || httpResp.StatusCode >= 500 {
+			return nil, &retryableError{err: apiErr}
+		}
+		return nil, apiErr // 400, 401, 403 etc — don't retry
 	}
 
 	var anthResp anthropicResponse
@@ -136,10 +185,49 @@ func (m *Model) generate(ctx context.Context, req *model.LLMRequest) (*model.LLM
 	}
 
 	if anthResp.Error != nil {
-		return nil, fmt.Errorf("anthropic error: %s: %s", anthResp.Error.Type, anthResp.Error.Message)
+		apiErr := fmt.Errorf("anthropic error: %s: %s", anthResp.Error.Type, anthResp.Error.Message)
+		// Overloaded errors are retryable
+		if anthResp.Error.Type == "overloaded_error" || anthResp.Error.Type == "rate_limit_error" {
+			return nil, &retryableError{err: apiErr}
+		}
+		return nil, apiErr
 	}
 
 	return m.convertResponse(&anthResp), nil
+}
+
+// retryableError wraps an error to signal the retry loop should continue.
+type retryableError struct {
+	err error
+}
+
+func (e *retryableError) Error() string { return e.err.Error() }
+func (e *retryableError) Unwrap() error { return e.err }
+
+func isRetryableError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var re *retryableError
+	if ok := errorAs(err, &re); ok {
+		return true
+	}
+	// Also retry on context deadline exceeded (timeout) but NOT context cancelled (user abort)
+	msg := err.Error()
+	if strings.Contains(msg, "deadline exceeded") || strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "connection reset") || strings.Contains(msg, "EOF") {
+		return true
+	}
+	return false
+}
+
+// errorAs is a type-assertion helper equivalent to errors.As for our retryableError.
+func errorAs(err error, target **retryableError) bool {
+	if e, ok := err.(*retryableError); ok {
+		*target = e
+		return true
+	}
+	return false
 }
 
 func (m *Model) convertRequest(req *model.LLMRequest) *anthropicRequest {
