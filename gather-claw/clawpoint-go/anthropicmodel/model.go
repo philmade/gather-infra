@@ -69,6 +69,7 @@ type contentBlock struct {
 	Input     map[string]any `json:"input,omitempty"`
 	ToolUseID string         `json:"tool_use_id,omitempty"`
 	Content   any            `json:"content,omitempty"`
+	IsError   bool           `json:"is_error,omitempty"`
 }
 
 type anthropicTool struct {
@@ -229,18 +230,24 @@ func (m *Model) convertContentToMessage(content *genai.Content) *anthropicMessag
 			})
 		}
 		if part.FunctionResponse != nil {
-			// Function responses go as user messages with tool_result
-			respContent := ""
-			if part.FunctionResponse.Response != nil {
-				if b, err := json.Marshal(part.FunctionResponse.Response); err == nil {
-					respContent = string(b)
-				}
-			}
-			blocks = append(blocks, contentBlock{
+			block := contentBlock{
 				Type:      "tool_result",
 				ToolUseID: part.FunctionResponse.ID,
-				Content:   respContent,
-			})
+			}
+			resp := part.FunctionResponse.Response
+			if len(resp) == 0 {
+				block.Content = "Tool returned no response"
+				block.IsError = true
+			} else if _, hasErr := resp["error"]; hasErr {
+				// ADK convention: "error" key signals tool failure
+				b, _ := json.Marshal(resp)
+				block.Content = string(b)
+				block.IsError = true
+			} else {
+				b, _ := json.Marshal(resp)
+				block.Content = string(b)
+			}
+			blocks = append(blocks, block)
 		}
 	}
 
@@ -306,6 +313,10 @@ func (m *Model) convertResponse(resp *anthropicResponse) *model.LLMResponse {
 }
 
 // mergeConsecutiveMessages ensures alternating user/assistant roles.
+// For plain text messages, consecutive same-role messages are merged.
+// For messages containing tool blocks (tool_use or tool_result), we insert
+// synthetic alternation to preserve sequential tool call ordering — merging
+// them would make sequential calls look like parallel calls.
 func mergeConsecutiveMessages(msgs []anthropicMessage) []anthropicMessage {
 	if len(msgs) <= 1 {
 		return msgs
@@ -313,17 +324,42 @@ func mergeConsecutiveMessages(msgs []anthropicMessage) []anthropicMessage {
 
 	var result []anthropicMessage
 	for _, msg := range msgs {
-		if len(result) > 0 && result[len(result)-1].Role == msg.Role {
-			// Merge into previous message
+		if len(result) == 0 || result[len(result)-1].Role != msg.Role {
+			result = append(result, msg)
+			continue
+		}
+		// Consecutive same-role — check if either contains tool blocks
+		if hasToolBlocks(result[len(result)-1].Content) || hasToolBlocks(msg.Content) {
+			// Insert synthetic alternation to preserve tool call sequencing
+			filler := "user"
+			if msg.Role == "user" {
+				filler = "assistant"
+			}
+			result = append(result, anthropicMessage{Role: filler, Content: "Continue."})
+			result = append(result, msg)
+		} else {
+			// Safe to merge plain text messages
 			prev := &result[len(result)-1]
 			prevBlocks := toBlocks(prev.Content)
 			newBlocks := toBlocks(msg.Content)
 			prev.Content = append(prevBlocks, newBlocks...)
-		} else {
-			result = append(result, msg)
 		}
 	}
 	return result
+}
+
+// hasToolBlocks checks if a message content contains tool_use or tool_result blocks.
+func hasToolBlocks(content any) bool {
+	blocks, ok := content.([]contentBlock)
+	if !ok {
+		return false
+	}
+	for _, b := range blocks {
+		if b.Type == "tool_use" || b.Type == "tool_result" {
+			return true
+		}
+	}
+	return false
 }
 
 func toBlocks(content any) []contentBlock {
