@@ -892,7 +892,9 @@ func sendToADKStream(containerName, userID, text string) (*http.Response, error)
 		Protocol: "gather-ui",
 	})
 
-	streamClient := &http.Client{Timeout: 300 * time.Second}
+	// No client-level timeout — SSE streams stay open for the entire agent run,
+	// streaming events tool-by-tool. The caller's context handles cancellation.
+	streamClient := &http.Client{}
 	resp, err := streamClient.Post(base+"/msg/stream", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("bridge stream request failed: %w", err)
@@ -1001,6 +1003,7 @@ func HandleClawStream(app *pocketbase.PocketBase) http.HandlerFunc {
 		// Stream bridge events to frontend, track last text for DB save
 		var lastText string
 		scanner := bufio.NewScanner(bridgeResp.Body)
+		scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024) // 2MB — ADK events can be large
 		for scanner.Scan() {
 			line := scanner.Text()
 			if !strings.HasPrefix(line, "data: ") {
