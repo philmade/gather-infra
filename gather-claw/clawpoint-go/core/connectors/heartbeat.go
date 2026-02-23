@@ -19,17 +19,19 @@ import (
 // Works standalone — no matterbridge or Telegram required.
 type InternalHeartbeat struct {
 	adkURL     string
+	appName    string
 	middleware *Middleware
 
 	sessionID string
 	mu        sync.Mutex
 }
 
-// NewInternalHeartbeat creates a heartbeat that talks to the ADK API at adkURL.
-func NewInternalHeartbeat(adkURL string) *InternalHeartbeat {
+// NewInternalHeartbeat creates a heartbeat targeting the specified ADK app.
+func NewInternalHeartbeat(adkURL string, appName string) *InternalHeartbeat {
 	return &InternalHeartbeat{
 		adkURL:     adkURL,
-		middleware: NewMiddleware(adkURL),
+		appName:    appName,
+		middleware: NewMiddlewareForApp(adkURL, appName),
 	}
 }
 
@@ -174,7 +176,7 @@ func (h *InternalHeartbeat) getOrCreateSession() (string, error) {
 
 	// Try to find an existing heartbeat session
 	client := &http.Client{Timeout: 10 * time.Second}
-	listURL := fmt.Sprintf("%s/api/apps/clawpoint/users/heartbeat/sessions", h.adkURL)
+	listURL := fmt.Sprintf("%s/api/apps/%s/users/heartbeat/sessions", h.adkURL, h.appName)
 	resp, err := client.Get(listURL)
 	if err == nil {
 		defer resp.Body.Close()
@@ -203,7 +205,7 @@ func (h *InternalHeartbeat) getOrCreateSession() (string, error) {
 	}
 
 	// Create new session
-	createURL := fmt.Sprintf("%s/api/apps/clawpoint/users/heartbeat/sessions", h.adkURL)
+	createURL := fmt.Sprintf("%s/api/apps/%s/users/heartbeat/sessions", h.adkURL, h.appName)
 	resp, err = client.Post(createURL, "application/json", strings.NewReader("{}"))
 	if err != nil {
 		return "", fmt.Errorf("create session: %w", err)

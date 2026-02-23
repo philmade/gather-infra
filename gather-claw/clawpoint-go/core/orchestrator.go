@@ -25,19 +25,28 @@ type OrchestratorConfig struct {
 	ExtensionAgents []agent.Agent
 }
 
-// BuildOrchestrator creates the full ClawPoint coordinator agent with all
-// sub-agents wired up. Returns the coordinator and a cleanup function.
-func BuildOrchestrator(ctx context.Context, cfg OrchestratorConfig) (agent.Agent, func(), error) {
+// SharedResources holds the shared model, tools, and cleanup function
+// used by both the clawpoint coordinator and the claw loop agent.
+type SharedResources struct {
+	Model    model.LLM
+	MemTool  *tools.MemoryTool
+	Soul     *tools.SoulTool
+	TaskTool *tools.TaskTool
+	Cleanup  func()
+}
+
+// BuildSharedResources initializes the LLM, memory, soul, and task tools
+// that are shared across all ADK apps in the process.
+func BuildSharedResources(ctx context.Context) (*SharedResources, error) {
 	llm, err := CreateModel(ctx)
 	if err != nil {
-		return nil, nil, fmt.Errorf("create model: %w", err)
+		return nil, fmt.Errorf("create model: %w", err)
 	}
 
-	// Initialize shared resources
 	dbPath := getEnv("CLAWPOINT_DB", "../messages.db")
 	memTool, err := tools.NewMemoryTool(dbPath)
 	if err != nil {
-		return nil, nil, fmt.Errorf("memory tool: %w", err)
+		return nil, fmt.Errorf("memory tool: %w", err)
 	}
 	cleanup := func() { memTool.Close() }
 
@@ -46,52 +55,77 @@ func BuildOrchestrator(ctx context.Context, cfg OrchestratorConfig) (agent.Agent
 	taskTool, err := tools.NewTaskTool(memTool.DB())
 	if err != nil {
 		cleanup()
-		return nil, nil, fmt.Errorf("task tool: %w", err)
+		return nil, fmt.Errorf("task tool: %w", err)
 	}
 
+	return &SharedResources{
+		Model:    llm,
+		MemTool:  memTool,
+		Soul:     soul,
+		TaskTool: taskTool,
+		Cleanup:  cleanup,
+	}, nil
+}
+
+// BuildSubAgents creates a fresh set of claude + research sub-agents.
+// Each caller gets its own instances (ADK sets parent pointers, so sharing
+// sub-agents between agent trees causes conflicts).
+func BuildSubAgents(llm model.LLM) ([]agent.Agent, error) {
+	return buildSubAgents(llm)
+}
+
+// BuildCoordinatorTools builds the full coordinator tool set from shared resources.
+func BuildCoordinatorTools(res *SharedResources) ([]tool.Tool, error) {
+	return buildCoordinatorTools(res.MemTool, res.Soul, res.TaskTool)
+}
+
+// BuildOrchestrator creates the full ClawPoint coordinator agent with all
+// sub-agents wired up. Takes shared resources instead of creating its own.
+func BuildOrchestrator(ctx context.Context, cfg OrchestratorConfig, res *SharedResources) (agent.Agent, error) {
 	// Build sub-agents (claude + research only)
-	subAgents, err := buildSubAgents(llm)
+	subAgents, err := buildSubAgents(res.Model)
 	if err != nil {
-		cleanup()
-		return nil, nil, fmt.Errorf("sub-agents: %w", err)
+		return nil, fmt.Errorf("sub-agents: %w", err)
 	}
 
 	// Add extension agents
 	subAgents = append(subAgents, cfg.ExtensionAgents...)
 
 	// Build coordinator tools (memory + soul + tasks + build + extensions + platform)
-	coordinatorTools, err := buildCoordinatorTools(memTool, soul, taskTool)
+	coordinatorTools, err := buildCoordinatorTools(res.MemTool, res.Soul, res.TaskTool)
 	if err != nil {
-		cleanup()
-		return nil, nil, fmt.Errorf("coordinator tools: %w", err)
+		return nil, fmt.Errorf("coordinator tools: %w", err)
 	}
 	coordinatorTools = append(coordinatorTools, cfg.ExtensionTools...)
 
 	// Build coordinator instruction
-	instruction := buildInstruction(soul, cfg)
+	instruction := buildInstruction(res.Soul, cfg)
 
 	coordinator, err := llmagent.New(llmagent.Config{
 		Name:        "clawpoint",
 		Description: "ClawPoint-Go orchestrator — delegates to specialized sub-agents.",
 		Instruction: instruction,
-		Model:       llm,
+		Model:       res.Model,
 		Tools:       coordinatorTools,
 		SubAgents:   subAgents,
 	})
 	if err != nil {
-		cleanup()
-		return nil, nil, fmt.Errorf("coordinator: %w", err)
+		return nil, fmt.Errorf("coordinator: %w", err)
 	}
 
-	return coordinator, cleanup, nil
+	return coordinator, nil
 }
 
 func buildSubAgents(llm model.LLM) ([]agent.Agent, error) {
+	return buildSubAgentsWithPrefix(llm, "")
+}
+
+func buildSubAgentsWithPrefix(llm model.LLM, prefix string) ([]agent.Agent, error) {
 	claudeTools, err := tools.NewClaudeTools()
 	if err != nil {
 		return nil, fmt.Errorf("claude tools: %w", err)
 	}
-	claudeAgent, err := agents.NewClaudeAgent(llm, claudeTools)
+	claudeAgent, err := agents.NewClaudeAgent(llm, claudeTools, prefix)
 	if err != nil {
 		return nil, fmt.Errorf("claude agent: %w", err)
 	}
@@ -100,7 +134,7 @@ func buildSubAgents(llm model.LLM) ([]agent.Agent, error) {
 	if err != nil {
 		return nil, fmt.Errorf("research tools: %w", err)
 	}
-	researchAgent, err := agents.NewResearchAgent(llm, researchTools)
+	researchAgent, err := agents.NewResearchAgent(llm, researchTools, prefix)
 	if err != nil {
 		return nil, fmt.Errorf("research agent: %w", err)
 	}

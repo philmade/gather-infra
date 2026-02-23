@@ -7,10 +7,15 @@ import (
 	"google.golang.org/adk/tool"
 )
 
-// NewClaudeAgent creates the Claude Code delegation sub-agent.
-func NewClaudeAgent(llm model.LLM, tools []tool.Tool) (agent.Agent, error) {
+// NewClaudeAgent creates a Claude Code delegation sub-agent with the given name prefix.
+// The prefix ensures unique names when multiple instances exist in the same agent tree.
+func NewClaudeAgent(llm model.LLM, tools []tool.Tool, namePrefix string) (agent.Agent, error) {
+	name := "claude"
+	if namePrefix != "" {
+		name = namePrefix + "_claude"
+	}
 	return llmagent.New(llmagent.Config{
-		Name:        "claude",
+		Name: name,
 		Description: "Full Claude Code agent — for complex coding tasks, multi-file refactors, research + code, heavy lifting.",
 		Instruction: `You are the Claude agent. You handle all coding tasks — quick edits, multi-file refactors, builds, and anything involving files or bash.
 
@@ -29,7 +34,7 @@ Key directories:
 - /app/public/ — blog and web page files (read/write)
 - /app/soul/ — identity files (SOUL.md, IDENTITY.md, etc.)
 
-Do the work directly. Be surgical. Report what you did, then transfer back to clawpoint.`,
+Do the work directly. Be surgical. Report what you did, then transfer back to your parent agent.`,
 		Model: llm,
 		Tools: tools,
 	})

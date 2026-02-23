@@ -33,9 +33,14 @@ type Middleware struct {
 	llmModel   string
 }
 
-// NewMiddleware creates a middleware instance.
+// NewMiddleware creates a middleware instance targeting the "clawpoint" app.
 // It reads configuration from environment variables.
 func NewMiddleware(adkURL string) *Middleware {
+	return NewMiddlewareForApp(adkURL, "clawpoint")
+}
+
+// NewMiddlewareForApp creates a middleware instance targeting the specified ADK app.
+func NewMiddlewareForApp(adkURL string, appName string) *Middleware {
 	llmBase := os.Getenv("ANTHROPIC_API_BASE")
 	if llmBase == "" {
 		llmBase = "https://api.z.ai/api/anthropic"
@@ -48,7 +53,7 @@ func NewMiddleware(adkURL string) *Middleware {
 
 	return &Middleware{
 		adkURL:         adkURL,
-		appName:        "clawpoint",
+		appName:        appName,
 		httpClient:     &http.Client{Timeout: 300 * time.Second},
 		messagesDBPath: os.Getenv("CLAWPOINT_DB"),
 		llmBaseURL:     llmBase,

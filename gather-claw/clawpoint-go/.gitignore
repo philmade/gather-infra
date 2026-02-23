@@ -6,3 +6,9 @@
 /bridge
 /proxy
 *.db
+
+# Local test artifacts
+soul/
+trends/
+.adk/
+data/

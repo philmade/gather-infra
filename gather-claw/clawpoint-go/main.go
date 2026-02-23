@@ -30,15 +30,35 @@ func main() {
 		log.Fatalf("Failed to load extension agents: %v", err)
 	}
 
-	// Build the orchestrator with core + extensions
-	coordinator, cleanup, err := core.BuildOrchestrator(ctx, core.OrchestratorConfig{
+	cfg := core.OrchestratorConfig{
 		ExtensionTools:  extTools,
 		ExtensionAgents: extAgents,
-	})
+	}
+
+	// Build shared resources (model, memory, soul, tasks)
+	shared, err := core.BuildSharedResources(ctx)
+	if err != nil {
+		log.Fatalf("Failed to build shared resources: %v", err)
+	}
+	defer shared.Cleanup()
+
+	// Build the interactive coordinator ("clawpoint" app — Telegram + web UI)
+	coordinator, err := core.BuildOrchestrator(ctx, cfg, shared)
 	if err != nil {
 		log.Fatalf("Failed to build orchestrator: %v", err)
 	}
-	defer cleanup()
+
+	// Build the autonomous loop agent ("claw" app — generator-reviewer loop)
+	clawAgent, err := core.BuildClawAgent(shared, cfg)
+	if err != nil {
+		log.Fatalf("Failed to build claw agent: %v", err)
+	}
+
+	// Multi-loader: both apps available in ADK web UI dropdown
+	loader, err := agent.NewMultiLoader(coordinator, clawAgent)
+	if err != nil {
+		log.Fatalf("Failed to create multi-loader: %v", err)
+	}
 
 	// In-memory sessions — compaction stores durable memories to messages.db,
 	// and heartbeat injection restores continuity on restart.
@@ -56,19 +76,17 @@ func main() {
 		cancel()
 	}()
 
-	// Start internal heartbeat goroutine — waits for ADK server to be ready,
-	// then sends periodic [HEARTBEAT] messages through the middleware pipeline.
-	// Uses the same port as the ADK server (default 8080, or ADK_PORT env var).
+	// Start internal heartbeat goroutine — targets "claw" app for autonomous work.
 	adkPort := os.Getenv("ADK_PORT")
 	if adkPort == "" {
 		adkPort = "8080"
 	}
-	hb := connectors.NewInternalHeartbeat("http://127.0.0.1:" + adkPort)
+	hb := connectors.NewInternalHeartbeat("http://127.0.0.1:"+adkPort, "claw")
 	go hb.Start(ctx)
 
 	// Run with ADK launcher
 	config := &launcher.Config{
-		AgentLoader:    agent.NewSingleLoader(coordinator),
+		AgentLoader:    loader,
 		SessionService: sessionService,
 	}
 	l := full.NewLauncher()

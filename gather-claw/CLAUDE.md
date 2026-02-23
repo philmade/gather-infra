@@ -32,9 +32,9 @@ The agent codebase is split into two parts:
 - **core/** — Versioned infrastructure (orchestrator, tools, agents, connectors). Operator-managed, agent reads but does not modify.
 - **extensions/** — Agent-writable Starlark scripts in `/app/data/extensions/`. Persist across restarts on the data volume.
 
-The agent has 5 built-in sub-agents: **memory** (SQLite), **soul** (identity files), **pi** (coding/files), **claude** (Claude Code CLI), **research** (Chawan browser).
+The agent has 2 sub-agents: **claude** (Claude Code CLI — coding, files, bash) and **research** (Chawan browser — web research).
 
-The coordinator has direct tools: **extension_list**, **extension_run** (Starlark), **build_and_deploy** (Go recompilation via external build service).
+The coordinator has direct tools: **memory** (SQLite), **soul** (identity files), **tasks** (structured task management), **extension_list**, **extension_run** (Starlark), **build_and_deploy** (Go recompilation via external build service), **platform** tools (Gather.is identity).
 
 ### Starlark Extensions
 
