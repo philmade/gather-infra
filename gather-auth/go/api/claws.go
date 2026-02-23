@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"sort"
@@ -913,7 +914,7 @@ func sendToADKStream(containerName, userID, text string) (*http.Response, error)
 // This is a raw PocketBase route (not Huma) because Huma doesn't support SSE.
 func HandleClawStream(app *pocketbase.PocketBase) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		app.Logger().Info("HandleClawStream called", "path", r.URL.Path, "method", r.Method)
+		log.Printf("[STREAM] HandleClawStream called: %s %s", r.Method, r.URL.Path)
 
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
@@ -924,7 +925,7 @@ func HandleClawStream(app *pocketbase.PocketBase) http.HandlerFunc {
 		authHeader := r.Header.Get("Authorization")
 		userID, err := extractPBUserID(app, authHeader)
 		if err != nil {
-			app.Logger().Warn("HandleClawStream auth failed", "error", err)
+			log.Printf("[STREAM] auth failed: %v", err)
 			http.Error(w, `{"error":"Authentication required"}`, http.StatusUnauthorized)
 			return
 		}
@@ -936,7 +937,7 @@ func HandleClawStream(app *pocketbase.PocketBase) http.HandlerFunc {
 			return
 		}
 		clawID := parts[0]
-		app.Logger().Info("HandleClawStream", "clawID", clawID, "userID", userID)
+		log.Printf("[STREAM] clawID=%s userID=%s", clawID, userID)
 
 		record, err := app.FindRecordById("claw_deployments", clawID)
 		if err != nil || record.GetString("user_id") != userID {
@@ -984,13 +985,15 @@ func HandleClawStream(app *pocketbase.PocketBase) http.HandlerFunc {
 		}
 
 		// Stream from bridge
+		log.Printf("[STREAM] sending to bridge: container=%s", containerID)
 		bridgeResp, err := sendToADKStream(containerID, userID, reqBody.Body)
 		if err != nil {
-			app.Logger().Error("ADK stream proxy failed", "claw", containerID, "error", err)
+			log.Printf("[STREAM] ERROR: bridge failed: %v", err)
 			http.Error(w, fmt.Sprintf(`{"error":"Claw did not respond: %v"}`, err), http.StatusBadGateway)
 			return
 		}
 		defer bridgeResp.Body.Close()
+		log.Printf("[STREAM] bridge responded %d, starting SSE relay", bridgeResp.StatusCode)
 
 		// Set SSE headers
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -1000,14 +1003,15 @@ func HandleClawStream(app *pocketbase.PocketBase) http.HandlerFunc {
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
-			app.Logger().Error("HandleClawStream: response writer does not support Flusher", "type", fmt.Sprintf("%T", w))
+			log.Printf("[STREAM] ERROR: response writer %T does not support Flusher", w)
 			http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
 			return
 		}
-		app.Logger().Info("HandleClawStream: flusher OK, starting stream")
+		log.Printf("[STREAM] flusher OK, starting stream to claw container %s", containerID)
 
 		// Stream bridge events to frontend, track last text for DB save
 		var lastText string
+		var eventCount int
 		scanner := bufio.NewScanner(bridgeResp.Body)
 		scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024) // 2MB — ADK events can be large
 		for scanner.Scan() {
@@ -1017,11 +1021,16 @@ func HandleClawStream(app *pocketbase.PocketBase) http.HandlerFunc {
 			}
 
 			data := line[6:]
+			eventCount++
 
 			// Parse to track lastText from "end" event
 			var evt map[string]any
 			if err := json.Unmarshal([]byte(data), &evt); err == nil {
-				if evtType, _ := evt["type"].(string); evtType == "end" {
+				evtType, _ := evt["type"].(string)
+				if eventCount <= 5 || evtType == "end" {
+					log.Printf("[STREAM] event #%d type=%s len=%d", eventCount, evtType, len(data))
+				}
+				if evtType == "end" {
 					if t, _ := evt["text"].(string); t != "" {
 						lastText = t
 					}
@@ -1032,6 +1041,10 @@ func HandleClawStream(app *pocketbase.PocketBase) http.HandlerFunc {
 			fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
 		}
+		if err := scanner.Err(); err != nil {
+			log.Printf("[STREAM] scanner error after %d events: %v", eventCount, err)
+		}
+		log.Printf("[STREAM] done: relayed %d events, lastText=%d bytes", eventCount, len(lastText))
 
 		// Save claw reply to DB
 		if lastText != "" {
