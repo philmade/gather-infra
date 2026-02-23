@@ -828,8 +828,10 @@ func (mw *Middleware) sendRunSSEInternal(ctx context.Context, userID, sessionID,
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "text/event-stream")
 
-	client := &http.Client{Timeout: 300 * time.Second}
-	resp, err := client.Do(req)
+	// No client-level timeout — SSE streams stay open for the entire agent run,
+	// streaming events tool-by-tool. The request context handles cancellation.
+	sseClient := &http.Client{}
+	resp, err := sseClient.Do(req)
 	if err != nil {
 		return "", nil, err
 	}
@@ -854,6 +856,11 @@ func parseSSEResponse(r io.Reader) (string, error) {
 // If onEvent is non-nil, each parsed event is emitted immediately via the callback.
 func parseSSEResponseFull(r io.Reader, onEvent func(ADKEvent)) (string, []ADKEvent, error) {
 	scanner := bufio.NewScanner(r)
+	// ADK SSE events can be very large (tool results with full file contents, memory
+	// recalls, etc.). Default bufio.Scanner buffer is 64KB — if any single SSE line
+	// exceeds that, scanner.Scan() silently returns false and we lose the rest of the
+	// agent's execution. 2MB handles even the largest tool results.
+	scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024)
 	var lastText string
 	var events []ADKEvent
 
@@ -942,6 +949,15 @@ func parseSSEResponseFull(r io.Reader, onEvent func(ADKEvent)) (string, []ADKEve
 				}
 			}
 		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		// Partial results are still useful — log the error but return what we have
+		log.Printf("  SSE scanner error (got %d events before failure): %v", len(events), err)
+		if lastText != "" {
+			return lastText, events, nil
+		}
+		return "", events, fmt.Errorf("SSE stream read error: %w", err)
 	}
 
 	return lastText, events, nil
