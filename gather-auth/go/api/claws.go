@@ -913,6 +913,8 @@ func sendToADKStream(containerName, userID, text string) (*http.Response, error)
 // This is a raw PocketBase route (not Huma) because Huma doesn't support SSE.
 func HandleClawStream(app *pocketbase.PocketBase) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		app.Logger().Info("HandleClawStream called", "path", r.URL.Path, "method", r.Method)
+
 		if r.Method != http.MethodPost {
 			http.Error(w, "POST only", http.StatusMethodNotAllowed)
 			return
@@ -922,6 +924,7 @@ func HandleClawStream(app *pocketbase.PocketBase) http.HandlerFunc {
 		authHeader := r.Header.Get("Authorization")
 		userID, err := extractPBUserID(app, authHeader)
 		if err != nil {
+			app.Logger().Warn("HandleClawStream auth failed", "error", err)
 			http.Error(w, `{"error":"Authentication required"}`, http.StatusUnauthorized)
 			return
 		}
@@ -933,6 +936,7 @@ func HandleClawStream(app *pocketbase.PocketBase) http.HandlerFunc {
 			return
 		}
 		clawID := parts[0]
+		app.Logger().Info("HandleClawStream", "clawID", clawID, "userID", userID)
 
 		record, err := app.FindRecordById("claw_deployments", clawID)
 		if err != nil || record.GetString("user_id") != userID {
@@ -996,9 +1000,11 @@ func HandleClawStream(app *pocketbase.PocketBase) http.HandlerFunc {
 
 		flusher, ok := w.(http.Flusher)
 		if !ok {
+			app.Logger().Error("HandleClawStream: response writer does not support Flusher", "type", fmt.Sprintf("%T", w))
 			http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
 			return
 		}
+		app.Logger().Info("HandleClawStream: flusher OK, starting stream")
 
 		// Stream bridge events to frontend, track last text for DB save
 		var lastText string
