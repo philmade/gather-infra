@@ -2,7 +2,6 @@ package api
 
 import (
 	"archive/tar"
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -1009,42 +1008,20 @@ func HandleClawStream(app *pocketbase.PocketBase) http.HandlerFunc {
 		}
 		log.Printf("[STREAM] flusher OK, starting stream to claw container %s", containerID)
 
-		// Stream bridge events to frontend, track last text for DB save
-		var lastText string
-		var eventCount int
-		scanner := bufio.NewScanner(bridgeResp.Body)
-		scanner.Buffer(make([]byte, 0, 64*1024), 2*1024*1024) // 2MB — ADK events can be large
-		for scanner.Scan() {
-			line := scanner.Text()
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
+		// Raw byte relay — no per-event JSON parsing.
+		// TeeReader captures trailing bytes so we can extract the "end" event after stream closes.
+		tail := &tailBuffer{max: 256 * 1024}
+		tee := io.TeeReader(bridgeResp.Body, tail)
 
-			data := line[6:]
-			eventCount++
-
-			// Parse to track lastText from "end" event
-			var evt map[string]any
-			if err := json.Unmarshal([]byte(data), &evt); err == nil {
-				evtType, _ := evt["type"].(string)
-				if eventCount <= 5 || evtType == "end" {
-					log.Printf("[STREAM] event #%d type=%s len=%d", eventCount, evtType, len(data))
-				}
-				if evtType == "end" {
-					if t, _ := evt["text"].(string); t != "" {
-						lastText = t
-					}
-				}
-			}
-
-			// Forward the SSE event
-			fmt.Fprintf(w, "data: %s\n\n", data)
-			flusher.Flush()
+		fw := &flushWriter{w: w, f: flusher}
+		n, copyErr := io.Copy(fw, tee)
+		if copyErr != nil {
+			log.Printf("[STREAM] relay error after %d bytes: %v", n, copyErr)
 		}
-		if err := scanner.Err(); err != nil {
-			log.Printf("[STREAM] scanner error after %d events: %v", eventCount, err)
-		}
-		log.Printf("[STREAM] done: relayed %d events, lastText=%d bytes", eventCount, len(lastText))
+		log.Printf("[STREAM] done: relayed %d bytes", n)
+
+		// Extract the "end" event text from the tail of the stream
+		lastText := extractEndText(tail.Bytes())
 
 		// Save claw reply to DB
 		if lastText != "" {
@@ -1066,6 +1043,60 @@ func HandleClawStream(app *pocketbase.PocketBase) http.HandlerFunc {
 			flusher.Flush()
 		}
 	}
+}
+
+// flushWriter wraps an io.Writer + http.Flusher, flushing after every Write.
+type flushWriter struct {
+	w io.Writer
+	f http.Flusher
+}
+
+func (fw *flushWriter) Write(p []byte) (int, error) {
+	n, err := fw.w.Write(p)
+	if n > 0 {
+		fw.f.Flush()
+	}
+	return n, err
+}
+
+// tailBuffer keeps the last `max` bytes written to it (ring buffer).
+type tailBuffer struct {
+	max int
+	buf []byte
+}
+
+func (tb *tailBuffer) Write(p []byte) (int, error) {
+	tb.buf = append(tb.buf, p...)
+	if len(tb.buf) > tb.max {
+		tb.buf = tb.buf[len(tb.buf)-tb.max:]
+	}
+	return len(p), nil
+}
+
+func (tb *tailBuffer) Bytes() []byte {
+	return tb.buf
+}
+
+// extractEndText scans backwards through SSE data to find the "end" event and return its text.
+func extractEndText(data []byte) string {
+	lines := strings.Split(string(data), "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		d := line[6:]
+		if !strings.Contains(d, `"type":"end"`) {
+			continue
+		}
+		var evt map[string]any
+		if err := json.Unmarshal([]byte(d), &evt); err == nil {
+			if t, _ := evt["text"].(string); t != "" {
+				return t
+			}
+		}
+	}
+	return ""
 }
 
 // extractPBUserID parses a PocketBase auth token and returns the user ID.
