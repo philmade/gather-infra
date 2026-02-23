@@ -159,13 +159,22 @@ func BuildClawAgent(res *SharedResources, cfg OrchestratorConfig) (agent.Agent, 
 		return nil, fmt.Errorf("claw orchestrator tools: %w", err)
 	}
 
+	// Orchestrator gets its own claude + research for ad-hoc requests
+	// (conversational queries, filesystem exploration, quick lookups)
+	// that don't warrant a full build/ops loop.
+	orchSubAgents, err := buildSubAgents(res.Model)
+	if err != nil {
+		return nil, fmt.Errorf("orchestrator sub-agents: %w", err)
+	}
+	orchSubAgents = append(orchSubAgents, buildLoop, opsLoop)
+
 	return llmagent.New(llmagent.Config{
 		Name:        "claw",
 		Description: "Autonomous claw agent — orchestrates build and ops lifecycle.",
 		Instruction: buildClawOrchestratorInstruction(res.Soul, handoffDir),
 		Model:       res.Model,
 		Tools:       orchTools,
-		SubAgents:   []agent.Agent{buildLoop, opsLoop},
+		SubAgents:   orchSubAgents,
 	})
 }
 
@@ -386,7 +395,7 @@ The build and ops loops communicate through standardized files in %[1]s/:
 
 When a loop finishes and control returns to you:
 1. **Read the handoff file** — MANUAL.md after build, FEEDBACK.md after ops.
-   Use the **build_claude** or **ops_claude** sub-agent to read the file if needed.
+   Use the **claude** sub-agent to read the file if needed.
 2. **Compose the user report** — This is where the detailed, well-formatted summary goes.
    Include: what was built/tested, key results, files created, how to use it, what's next.
    This is the ONE place the user gets the full picture. Make it thorough and useful.
@@ -412,6 +421,8 @@ batch them together. For example: search memory + check tasks + read soul in one
 
 | Agent | What it does |
 |-------|-------------|
+| **claude** | Direct coding/filesystem access — for ad-hoc requests, reading files, quick tasks |
+| **research** | Direct web research — for lookups that don't need a full loop |
 | **build_loop** | Construction cycle (generator → build_reviewer, repeats until done) |
 | **ops_loop** | Operations cycle (operator → ops_reviewer, repeats until done) |
 `, handoffDir))
