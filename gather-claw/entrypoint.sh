@@ -71,7 +71,7 @@ if [ -n "$ADK_WEBUI_ADDRESS" ]; then
     WEBUI_FLAG="-api_server_address ${ADK_WEBUI_ADDRESS}"
 fi
 echo "Starting clawpoint-go on :${ADK_PORT}..."
-./clawpoint-go web -port ${ADK_PORT} api webui ${WEBUI_FLAG} > /tmp/adk-go.log 2>&1 &
+./clawpoint-go web -port ${ADK_PORT} -write-timeout 10m api -sse-write-timeout 10m webui ${WEBUI_FLAG} > /tmp/adk-go.log 2>&1 &
 
 # --- Start proxy (public-facing, port 8080 → ADK on 8081) ---
 echo "Starting clawpoint-proxy on :8080..."
