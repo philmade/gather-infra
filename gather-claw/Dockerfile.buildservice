@@ -1,4 +1,4 @@
-# ClawPoint Build Service — compiles claw agent source externally.
+# Clay Build Service — compiles agent source externally.
 #
 # Stateless: receives source tarball via HTTP, compiles, returns binary.
 # No shared volumes needed. The Go toolchain + module cache live here.
@@ -13,12 +13,12 @@ RUN apk add --no-cache git
 WORKDIR /build-service
 
 # Pre-warm the module cache with current dependencies
-COPY clawpoint-go/go.mod clawpoint-go/go.sum /warmup/
+COPY clay/go.mod clay/go.sum /warmup/
 RUN cd /warmup && go mod download && rm -rf /warmup
 
 # Build the service binary
-COPY clawpoint-go/ /build-service/
-RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /usr/local/bin/clawpoint-buildservice ./cmd/buildservice
+COPY clay/ /build-service/
+RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /usr/local/bin/clay-buildservice ./cmd/buildservice
 
 # Clean up source — not needed at runtime
 RUN rm -rf /build-service/*
@@ -27,4 +27,4 @@ ENV BUILD_ADDR=:9090
 
 EXPOSE 9090
 
-CMD ["clawpoint-buildservice"]
+CMD ["clay-buildservice"]

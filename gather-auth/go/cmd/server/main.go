@@ -1520,8 +1520,8 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 	// Build env slice: host defaults first, then vault overrides
 	envMap := map[string]string{
 		"MODEL_PROVIDER": "anthropic",
-		"CLAWPOINT_ROOT": "/app",
-		"CLAWPOINT_DB":   "/app/data/messages.db",
+		"CLAY_ROOT": "/app",
+		"CLAY_DB":   "/app/data/messages.db",
 		"CLAW_NAME":      clawDisplayName,
 		"GATHER_PRIVATE_KEY": privB64,
 		"GATHER_PUBLIC_KEY":  pubB64,

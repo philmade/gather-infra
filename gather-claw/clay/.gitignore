@@ -1,0 +1,14 @@
+# Compiled binaries (built by Docker, not committed)
+/clay
+/clay-medic
+/clay-bridge
+/clay-proxy
+/bridge
+/proxy
+*.db
+
+# Local test artifacts
+soul/
+trends/
+.adk/
+data/

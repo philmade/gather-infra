@@ -12,8 +12,8 @@ services:
       - TELEGRAM_CHAT_ID=__TELEGRAM_CHAT_ID__
       - GATHER_PRIVATE_KEY=__GATHER_PRIVATE_KEY__
       - GATHER_PUBLIC_KEY=__GATHER_PUBLIC_KEY__
-      - CLAWPOINT_ROOT=/app
-      - CLAWPOINT_DB=/app/data/messages.db
+      - CLAY_ROOT=/app
+      - CLAY_DB=/app/data/messages.db
     volumes:
       - ./data:/app/data
       - ./soul:/app/soul

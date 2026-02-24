@@ -1,16 +1,20 @@
 # Secrets & credentials
 .gather/keys/
 
-# ClawPoint-Go compiled binaries (source is committed, binaries are not)
-clawpoint-go/clawpoint-go
-clawpoint-go/clawpoint-medic
-clawpoint-go/clawpoint-bridge
-clawpoint-go/clawpoint-proxy
-clawpoint-go/*.db
+# Clay compiled binaries (source is committed, binaries are not)
+clay/clay
+clay/clay-medic
+clay/clay-bridge
+clay/clay-proxy
+clay/*.db
 
 # Dev data volumes
 dev-data/
 dev-soul/
+dev-builds/
+
+# Archive build artifacts
+_archive/**/target/
 
 # Runtime state & logs
 .gather/heartbeat.log

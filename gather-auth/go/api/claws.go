@@ -1165,7 +1165,7 @@ func resolveAuthorName(app *pocketbase.PocketBase, authorID string) string {
 // ---------------------------------------------------------------------------
 
 // allowedEnvKeys is the allowlist of env vars users can set via the UI.
-// System vars (GATHER_PRIVATE_KEY, CLAWPOINT_ROOT, etc.) are excluded.
+// System vars (GATHER_PRIVATE_KEY, CLAY_ROOT, etc.) are excluded.
 var allowedEnvKeys = map[string]bool{
 	"MODEL_PROVIDER":     true,
 	"ANTHROPIC_API_KEY":  true,

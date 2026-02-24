@@ -2,14 +2,14 @@
 
 ## What This Is
 
-Per-user agent containers running ClawPoint-Go — a Google ADK-based multi-agent orchestrator with self-healing, persistent memory, Telegram messaging (via Matterbridge), Starlark scripting, and web research. Each claw is an Alpine container exposing an ADK API on port 8080.
+Per-user agent containers running Clay — a Google ADK-based multi-agent orchestrator with self-healing, persistent memory, Telegram messaging (via Matterbridge), Starlark scripting, and web research. Each claw is an Alpine container exposing an ADK API on port 8080.
 
 ## Architecture
 
 - **Runtime**: Alpine 3.19 (no GUI, no desktop)
-- **Agent**: ClawPoint-Go v0.655 (ADK multi-agent orchestrator, Core/Extensions architecture)
+- **Agent**: Clay v0.655 (ADK multi-agent orchestrator, Core/Extensions architecture)
 - **Messaging**: Matterbridge (Telegram <-> ADK bridge)
-- **Supervisor**: clawpoint-medic (self-healing watchdog with hot-swap + rollback)
+- **Supervisor**: clay-medic (self-healing watchdog with hot-swap + rollback)
 - **LLM backend**: Anthropic-compatible (z.ai GLM by default)
 - **Extensions**: Starlark (.star) scripts — embedded Python dialect, no recompilation needed
 - **Identity**: Ed25519 keypair per claw (Gather agent identity)
@@ -19,10 +19,10 @@ Per-user agent containers running ClawPoint-Go — a Google ADK-based multi-agen
 
 | Process | Purpose |
 |---------|---------|
-| `clawpoint-go` | ADK multi-agent orchestrator (port 8081 internal) |
-| `clawpoint-proxy` | Public-facing proxy (port 8080 → ADK + static files) |
-| `clawpoint-medic` | Supervisor/watchdog with hot-swap + rollback (PID 1) |
-| `clawpoint-bridge` | Matterbridge <-> ADK connector |
+| `clay` | ADK multi-agent orchestrator (port 8081 internal) |
+| `clay-proxy` | Public-facing proxy (port 8080 → ADK + static files) |
+| `clay-medic` | Supervisor/watchdog with hot-swap + rollback (PID 1) |
+| `clay-bridge` | Matterbridge <-> ADK connector |
 | `matterbridge` | Telegram bot <-> local API bridge |
 
 ## Core/Extensions Architecture
@@ -53,10 +53,10 @@ Available builtins: `http_get(url)`, `http_post(url, body, type)`, `read_file(pa
 
 ```
 /app/
-├── clawpoint-go          # Main agent binary
-├── clawpoint-medic       # Supervisor binary
-├── clawpoint-bridge      # Matterbridge connector binary
-├── clawpoint-proxy       # Public proxy binary
+├── clay          # Main agent binary
+├── clay-medic       # Supervisor binary
+├── clay-bridge      # Matterbridge connector binary
+├── clay-proxy       # Public proxy binary
 ├── core-version          # Version string (e.g. "0.655")
 ├── src/                  # Full Go source code (read-only, agent can inspect)
 │   ├── core/             # Core infrastructure source
@@ -104,23 +104,28 @@ gather-claw/
 │   ├── setup-host.sh       # One-time server setup
 │   ├── docker-compose.user.yml.tpl
 │   └── nginx-user.conf.tpl
-└── clawpoint-go/           # Go source (committed in repo)
-    ├── main.go             # Entry point (loads core + extensions)
-    ├── core/
-    │   ├── VERSION         # e.g. "0.655"
-    │   ├── orchestrator.go # Coordinator setup, sub-agent wiring
-    │   ├── model.go        # LLM provider setup (anthropic/gemini)
-    │   ├── tools/          # Built-in tools (memory, soul, fs, research, claude, skills, build, starlark)
-    │   ├── agents/         # Sub-agent configs (memory, soul, coding, claude, research)
-    │   └── connectors/     # Matterbridge API client
-    ├── extensions/         # Go extension point (compile-time)
-    │   └── extensions.go
-    ├── cmd/
-    │   ├── medic/          # Supervisor with hot-swap + rollback
-    │   ├── bridge/         # Matterbridge connector
-    │   ├── proxy/          # Public-facing HTTP proxy
-    │   └── buildservice/   # External Go build service
-    └── anthropicmodel/     # Custom Anthropic adapter for Google ADK
+├── clay/           # Go source (committed in repo)
+│   ├── main.go             # Entry point (loads core + extensions)
+│   ├── core/
+│   │   ├── VERSION         # e.g. "0.655"
+│   │   ├── orchestrator.go # Coordinator setup, sub-agent wiring
+│   │   ├── model.go        # LLM provider setup (anthropic/gemini)
+│   │   ├── tools/          # Built-in tools (memory, soul, fs, research, claude, skills, build, starlark)
+│   │   ├── agents/         # Sub-agent configs (memory, soul, coding, claude, research)
+│   │   └── connectors/     # Matterbridge API client
+│   ├── extensions/         # Go extension point (compile-time)
+│   │   └── extensions.go
+│   ├── cmd/
+│   │   ├── medic/          # Supervisor with hot-swap + rollback
+│   │   ├── bridge/         # Matterbridge connector
+│   │   ├── proxy/          # Public-facing HTTP proxy
+│   │   └── buildservice/   # External Go build service
+│   └── anthropicmodel/     # Custom Anthropic adapter for Google ADK
+└── _archive/               # Historical artifacts (not production)
+    ├── strategy.md         # Original BuyClaw SaaS vision doc
+    ├── BRIEF-CLAW-PUBLIC-PAGE.md
+    ├── zeroclaw-gather-channel/  # Rust Gather channel adapter prototype
+    └── dot-gather/         # Python heartbeat + post scripts (superseded by Go)
 ```
 
 ## Environment Variables
@@ -137,8 +142,8 @@ gather-claw/
 | `GATHER_PUBLIC_KEY` | Base64-encoded Ed25519 public key |
 | `GATHER_AGENT_ID` | Gather platform agent ID |
 | `GATHER_BASE_URL` | Gather platform URL (default: `https://gather.is`) |
-| `CLAWPOINT_ROOT` | App root directory (default: `/app`) |
-| `CLAWPOINT_DB` | SQLite database path (default: `/app/data/messages.db`) |
+| `CLAY_ROOT` | App root directory (default: `/app`) |
+| `CLAY_DB` | SQLite database path (default: `/app/data/messages.db`) |
 | `BUILD_SERVICE_URL` | External build service URL (default: `http://127.0.0.1:9090`) |
 
 ## Volumes (Docker Named Volumes)
@@ -188,9 +193,21 @@ Volumes:   claw-data-<username>, claw-soul-<username>, claw-public-<username>
 ## Medic: Hot-Swap + Rollback
 
 When the agent self-builds via the build service:
-1. New binary appears at `/app/builds/clawpoint-go.new`
-2. Medic backs up current binary to `/app/clawpoint-go.prev`
+1. New binary appears at `/app/builds/clay.new`
+2. Medic backs up current binary to `/app/clay.prev`
 3. Medic swaps and restarts
 4. If new binary crashes within 30s → reverts to `.prev`
 5. Crash log written to `/app/data/build-failures/<timestamp>.log`
 6. Agent reads failure logs on next startup to learn from mistakes
+
+## SSE Streaming Pipeline (Known Limitation)
+
+Current path: Browser → Traefik → gather-auth → clay-proxy → bridge → ADK (5 hops)
+ADK debugger: Browser → ADK (1 hop)
+
+gather-auth proxies every SSE event through HandleClawStream (parses JSON, tracks
+final text for DB save, re-serializes). This adds latency vs the ADK debugger.
+
+Future: Browser → Traefik → claw subdomain (clay-proxy) → bridge → ADK.
+gather-auth issues a short-lived JWT, clay-proxy validates it. Drops one
+proxy hop and removes the auth server from the streaming hot path.

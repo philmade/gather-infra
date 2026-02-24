@@ -28,7 +28,7 @@ RemoteNickFormat=""
 BindAddress="127.0.0.1:4242"
 
 [[gateway]]
-name="clawpoint"
+name="clay"
 enable=true
 
 [[gateway.inout]]
@@ -63,25 +63,23 @@ fi
 # --- Port layout: proxy on :8080 (public), ADK on :8081 (internal) ---
 export ADK_PORT=8081
 
-# --- Start clawpoint-go (internal, port 8081) ---
-# ADK_WEBUI_ADDRESS lets the web UI know where the API is from the browser's perspective.
-# For local dev with exposed port 8181, set ADK_WEBUI_ADDRESS=http://localhost:8181/api
+# --- Start clay (internal, port 8081) ---
 WEBUI_FLAG=""
 if [ -n "$ADK_WEBUI_ADDRESS" ]; then
     WEBUI_FLAG="-api_server_address ${ADK_WEBUI_ADDRESS}"
 fi
-echo "Starting clawpoint-go on :${ADK_PORT}..."
-./clawpoint-go web -port ${ADK_PORT} -write-timeout 10m api -sse-write-timeout 10m webui ${WEBUI_FLAG} > /tmp/adk-go.log 2>&1 &
+echo "Starting clay on :${ADK_PORT}..."
+./clay web -port ${ADK_PORT} -write-timeout 10m api -sse-write-timeout 10m webui ${WEBUI_FLAG} > /tmp/adk-go.log 2>&1 &
 
 # --- Start proxy (public-facing, port 8080 → ADK on 8081) ---
-echo "Starting clawpoint-proxy on :8080..."
+echo "Starting clay-proxy on :8080..."
 PROXY_ADDR=":8080" ADK_INTERNAL="http://127.0.0.1:${ADK_PORT}" PUBLIC_DIR="/app/public" \
-    ./clawpoint-proxy > /tmp/proxy.log 2>&1 &
+    ./clay-proxy > /tmp/proxy.log 2>&1 &
 
 # --- Start bridge (always — serves Gather UI messages + Telegram if configured) ---
-echo "Starting clawpoint-bridge..."
-ADK_URL="http://127.0.0.1:${ADK_PORT}" ./clawpoint-bridge > /tmp/bridge.log 2>&1 &
+echo "Starting clay-bridge..."
+ADK_URL="http://127.0.0.1:${ADK_PORT}" ./clay-bridge > /tmp/bridge.log 2>&1 &
 
 # --- Medic as foreground supervisor ---
-echo "Starting clawpoint-medic..."
-exec ./clawpoint-medic
+echo "Starting clay-medic..."
+exec ./clay-medic
