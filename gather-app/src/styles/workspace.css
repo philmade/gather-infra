@@ -571,6 +571,27 @@ html, body {
     color: var(--text-secondary);
 }
 
+.adk-author-group {
+    margin-bottom: 2px;
+}
+
+.adk-author-label {
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--accent);
+    opacity: 0.8;
+    margin: 4px 0 1px;
+    letter-spacing: 0.02em;
+}
+
+.adk-event-narration {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-style: italic;
+    padding: 2px 0;
+    white-space: normal;
+}
+
 /* Typing indicator */
 
 .typing-dots {

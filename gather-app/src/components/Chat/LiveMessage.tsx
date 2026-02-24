@@ -23,24 +23,77 @@ function truncateResult(val: unknown, max = 80): string {
   return s.length > max ? s.slice(0, max) + '...' : s
 }
 
-function ToolCallEvents({ events }: { events: ChatMessage['events'] }) {
-  const [expanded, setExpanded] = useState<Set<number>>(new Set())
+type EventItem = NonNullable<ChatMessage['events']>[number]
 
-  if (!events || events.length === 0) return null
+// Group consecutive events by author, interleaving narration text events
+// between tool call groups for readability.
+interface AuthorGroup {
+  author: string
+  items: Array<{ kind: 'call'; call: EventItem; result?: EventItem } | { kind: 'narration'; text: string }>
+}
 
-  // Filter to only tool calls and tool results (skip text events)
-  const toolEvents = events.filter(e => e.type === 'tool_call' || e.type === 'tool_result')
-  if (toolEvents.length === 0) return null
-
-  // Pair tool_calls with their results by tool_id
-  const resultsByID = new Map<string, typeof toolEvents[0]>()
-  for (const e of toolEvents) {
+function groupEventsByAuthor(events: NonNullable<ChatMessage['events']>): AuthorGroup[] {
+  // Index tool results by tool_id for pairing
+  const resultsByID = new Map<string, EventItem>()
+  for (const e of events) {
     if (e.type === 'tool_result' && e.tool_id) {
       resultsByID.set(e.tool_id, e)
     }
   }
 
-  const calls = toolEvents.filter(e => e.type === 'tool_call')
+  const groups: AuthorGroup[] = []
+  let current: AuthorGroup | null = null
+
+  for (const evt of events) {
+    // Skip tool_result events — they're paired with their call
+    if (evt.type === 'tool_result') continue
+
+    const author = evt.author || 'agent'
+
+    // Start a new group when author changes
+    if (!current || current.author !== author) {
+      current = { author, items: [] }
+      groups.push(current)
+    }
+
+    if (evt.type === 'tool_call') {
+      const result = evt.tool_id ? resultsByID.get(evt.tool_id) : undefined
+      current.items.push({ kind: 'call', call: evt, result })
+    } else if (evt.type === 'text' && evt.text) {
+      // Narration text interleaved with tool calls — show inline.
+      // Skip if this is the final response text (last text event with no
+      // tool calls after it) — that gets rendered as the message body.
+      current.items.push({ kind: 'narration', text: evt.text })
+    }
+  }
+
+  // Drop the last text-only narration in the last group — it's the final
+  // response that LiveMessage renders as markdown body text.
+  if (groups.length > 0) {
+    const lastGroup = groups[groups.length - 1]
+    while (
+      lastGroup.items.length > 0 &&
+      lastGroup.items[lastGroup.items.length - 1].kind === 'narration'
+    ) {
+      lastGroup.items.pop()
+    }
+    if (lastGroup.items.length === 0) groups.pop()
+  }
+
+  return groups
+}
+
+function ToolCallEvents({ events }: { events: ChatMessage['events'] }) {
+  const [expanded, setExpanded] = useState<Set<number>>(new Set())
+
+  if (!events || events.length === 0) return null
+
+  const groups = groupEventsByAuthor(events)
+  if (groups.length === 0) return null
+
+  // Only show author labels when there are multiple distinct authors
+  const distinctAuthors = new Set(groups.map(g => g.author))
+  const showLabels = distinctAuthors.size > 1
 
   const toggle = (i: number) => {
     setExpanded(prev => {
@@ -51,29 +104,46 @@ function ToolCallEvents({ events }: { events: ChatMessage['events'] }) {
     })
   }
 
+  let globalIdx = 0
+
   return (
     <div className="adk-events">
-      {calls.map((call, i) => {
-        const result = call.tool_id ? resultsByID.get(call.tool_id) : undefined
-        const isExpanded = expanded.has(i)
-        const isLast = i === calls.length - 1
-        const prefix = isLast ? '\u2514' : '\u251C'
+      {groups.map((group, gi) => (
+        <div key={gi} className="adk-author-group">
+          {showLabels && (
+            <div className="adk-author-label">{group.author}</div>
+          )}
+          {group.items.map((item) => {
+            if (item.kind === 'narration') {
+              return (
+                <div key={`n-${gi}-${globalIdx++}`} className="adk-event-narration">
+                  {item.text}
+                </div>
+              )
+            }
+            const idx = globalIdx++
+            const isExpanded = expanded.has(idx)
+            const callItems = group.items.filter(it => it.kind === 'call')
+            const isLastInGroup = item === callItems[callItems.length - 1]
+            const prefix = isLastInGroup ? '\u2514' : '\u251C'
 
-        return (
-          <div key={i} className="adk-event-row" onClick={() => toggle(i)}>
-            <span className="adk-event-prefix">{prefix}</span>
-            <span className="adk-event-tool">{call.tool_name || 'tool'}</span>
-            {result && (
-              <span className="adk-event-result">
-                {' \u2192 '}{truncateResult(result.result)}
-              </span>
-            )}
-            {isExpanded && call.tool_args ? (
-              <pre className="adk-event-args">{JSON.stringify(call.tool_args, null, 2)}</pre>
-            ) : null}
-          </div>
-        )
-      })}
+            return (
+              <div key={idx} className="adk-event-row" onClick={() => toggle(idx)}>
+                <span className="adk-event-prefix">{prefix}</span>
+                <span className="adk-event-tool">{item.call.tool_name || 'tool'}</span>
+                {item.result && (
+                  <span className="adk-event-result">
+                    {' \u2192 '}{truncateResult(item.result.result)}
+                  </span>
+                )}
+                {isExpanded && item.call.tool_args ? (
+                  <pre className="adk-event-args">{JSON.stringify(item.call.tool_args, null, 2)}</pre>
+                ) : null}
+              </div>
+            )
+          })}
+        </div>
+      ))}
     </div>
   )
 }
