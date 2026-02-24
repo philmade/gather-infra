@@ -53,7 +53,7 @@ func BuildClayAgent(res *SharedResources, cfg OrchestratorConfig) (agent.Agent, 
 	// ===== BUILD LOOP =====
 
 	// Generator: full tools + own sub-agents (for construction work)
-	genSubAgents, err := buildSubAgentsWithPrefix(res.Model, "build")
+	genSubAgents, err := buildSubAgentsWithPrefix(res.Model, res.MemTool, "build")
 	if err != nil {
 		return nil, fmt.Errorf("generator sub-agents: %w", err)
 	}
@@ -105,7 +105,7 @@ func BuildClayAgent(res *SharedResources, cfg OrchestratorConfig) (agent.Agent, 
 	// ===== OPS LOOP =====
 
 	// Operator: lighter tools — runs things, monitors, doesn't build
-	opsSubAgents, err := buildSubAgentsWithPrefix(res.Model, "ops")
+	opsSubAgents, err := buildSubAgentsWithPrefix(res.Model, res.MemTool, "ops")
 	if err != nil {
 		return nil, fmt.Errorf("operator sub-agents: %w", err)
 	}
@@ -162,7 +162,7 @@ func BuildClayAgent(res *SharedResources, cfg OrchestratorConfig) (agent.Agent, 
 	// Orchestrator gets its own claude + research for ad-hoc requests
 	// (conversational queries, filesystem exploration, quick lookups)
 	// that don't warrant a full build/ops loop.
-	orchSubAgents, err := buildSubAgents(res.Model)
+	orchSubAgents, err := buildSubAgents(res.Model, res.MemTool)
 	if err != nil {
 		return nil, fmt.Errorf("orchestrator sub-agents: %w", err)
 	}

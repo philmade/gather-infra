@@ -70,8 +70,8 @@ func BuildSharedResources(ctx context.Context) (*SharedResources, error) {
 // BuildSubAgents creates a fresh set of claude + research sub-agents.
 // Each caller gets its own instances (ADK sets parent pointers, so sharing
 // sub-agents between agent trees causes conflicts).
-func BuildSubAgents(llm model.LLM) ([]agent.Agent, error) {
-	return buildSubAgents(llm)
+func BuildSubAgents(llm model.LLM, memTool *tools.MemoryTool) ([]agent.Agent, error) {
+	return buildSubAgents(llm, memTool)
 }
 
 // BuildCoordinatorTools builds the full coordinator tool set from shared resources.
@@ -83,7 +83,7 @@ func BuildCoordinatorTools(res *SharedResources) ([]tool.Tool, error) {
 // sub-agents wired up. Takes shared resources instead of creating its own.
 func BuildOrchestrator(ctx context.Context, cfg OrchestratorConfig, res *SharedResources) (agent.Agent, error) {
 	// Build sub-agents (claude + research only)
-	subAgents, err := buildSubAgents(res.Model)
+	subAgents, err := buildSubAgents(res.Model, res.MemTool)
 	if err != nil {
 		return nil, fmt.Errorf("sub-agents: %w", err)
 	}
@@ -116,15 +116,22 @@ func BuildOrchestrator(ctx context.Context, cfg OrchestratorConfig, res *SharedR
 	return coordinator, nil
 }
 
-func buildSubAgents(llm model.LLM) ([]agent.Agent, error) {
-	return buildSubAgentsWithPrefix(llm, "")
+func buildSubAgents(llm model.LLM, memTool *tools.MemoryTool) ([]agent.Agent, error) {
+	return buildSubAgentsWithPrefix(llm, memTool, "")
 }
 
-func buildSubAgentsWithPrefix(llm model.LLM, prefix string) ([]agent.Agent, error) {
+func buildSubAgentsWithPrefix(llm model.LLM, memTool *tools.MemoryTool, prefix string) ([]agent.Agent, error) {
 	claudeTools, err := tools.NewClaudeTools()
 	if err != nil {
 		return nil, fmt.Errorf("claude tools: %w", err)
 	}
+	// Give claude the memory tool so it can store a summary before returning to parent
+	memoryTool, err := tools.NewConsolidatedMemoryTool(memTool)
+	if err != nil {
+		return nil, fmt.Errorf("claude memory tool: %w", err)
+	}
+	claudeTools = append(claudeTools, memoryTool)
+
 	claudeAgent, err := agents.NewClaudeAgent(llm, claudeTools, prefix)
 	if err != nil {
 		return nil, fmt.Errorf("claude agent: %w", err)
