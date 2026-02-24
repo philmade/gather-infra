@@ -33,9 +33,11 @@ type SoulResult struct {
 	Message string `json:"message,omitempty"`
 }
 
-type ResearchArgs struct {
-	Query string `json:"query,omitempty" jsonschema:"Search query or URL to research"`
-	URL   string `json:"url,omitempty" jsonschema:"Specific URL to fetch"`
+type WebSearchArgs struct {
+	Query string `json:"query" jsonschema:"Search query (sent to DuckDuckGo)"`
+}
+type WebFetchArgs struct {
+	URL string `json:"url" jsonschema:"URL to fetch and extract content from"`
 }
 type ResearchResult struct{ Content string `json:"content"` }
 
@@ -221,26 +223,94 @@ func NewConsolidatedSoulTool(soul *SoulTool) (tool.Tool, error) {
 	)
 }
 
-// NewResearchTools creates research sub-agent tools.
+// NewResearchTools creates web_search and webfetch tools for research agents.
 func NewResearchTools() ([]tool.Tool, error) {
 	research := NewResearchTool()
 	var out []tool.Tool
 
 	t, err := functiontool.New(
-		functiontool.Config{Name: "research", Description: "Search the web or fetch a URL via Chawan browser"},
-		func(ctx tool.Context, args ResearchArgs) (ResearchResult, error) {
-			query := args.Query
-			if args.URL != "" {
-				query = args.URL
+		functiontool.Config{Name: "web_search", Description: "Search the web via DuckDuckGo. Returns search results as text."},
+		func(ctx tool.Context, args WebSearchArgs) (ResearchResult, error) {
+			if args.Query == "" {
+				return ResearchResult{}, fmt.Errorf("query is required")
 			}
-			if query == "" {
-				return ResearchResult{}, fmt.Errorf("query or url is required")
-			}
-			content, err := research.Research(query)
+			content, err := research.Research(args.Query)
 			if err != nil {
 				return ResearchResult{}, err
 			}
 			return ResearchResult{Content: content}, nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, t)
+
+	t, err = functiontool.New(
+		functiontool.Config{Name: "webfetch", Description: "Fetch a specific URL and extract its content as text."},
+		func(ctx tool.Context, args WebFetchArgs) (ResearchResult, error) {
+			if args.URL == "" {
+				return ResearchResult{}, fmt.Errorf("url is required")
+			}
+			content, err := research.Research(args.URL)
+			if err != nil {
+				return ResearchResult{}, err
+			}
+			return ResearchResult{Content: content}, nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, t)
+
+	return out, nil
+}
+
+// NewOrchestratorTools creates read-only filesystem tools for the orchestrator:
+// read, search, bash — no write, edit, or build.
+func NewOrchestratorTools() ([]tool.Tool, error) {
+	fs := NewFSTool()
+	var out []tool.Tool
+
+	t, err := functiontool.New(
+		functiontool.Config{Name: "read", Description: "Read a file or list a directory"},
+		func(ctx tool.Context, args FSReadArgs) (FSReadResult, error) {
+			content, err := fs.Read(args.Path)
+			if err != nil {
+				return FSReadResult{}, err
+			}
+			return FSReadResult{Content: content}, nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, t)
+
+	t, err = functiontool.New(
+		functiontool.Config{Name: "search", Description: "Search for files matching a glob pattern"},
+		func(ctx tool.Context, args FSSearchArgs) (FSSearchResult, error) {
+			matches, err := fs.Search(args.Pattern)
+			if err != nil {
+				return FSSearchResult{}, err
+			}
+			return FSSearchResult{Matches: matches, Count: len(matches)}, nil
+		},
+	)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, t)
+
+	t, err = functiontool.New(
+		functiontool.Config{Name: "bash", Description: "Run a bash command"},
+		func(ctx tool.Context, args FSBashArgs) (FSBashResult, error) {
+			output, err := fs.Bash(args.Command)
+			if err != nil {
+				return FSBashResult{Output: output}, err
+			}
+			return FSBashResult{Output: output}, nil
 		},
 	)
 	if err != nil {

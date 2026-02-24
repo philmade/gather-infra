@@ -68,7 +68,7 @@ func BuildClayAgent(res *SharedResources, cfg OrchestratorConfig) (agent.Agent, 
 	generator, err := llmagent.New(llmagent.Config{
 		Name:        "generator",
 		Description: "Generator — builds things: writes code, creates files, sets up systems.",
-		Instruction: buildGeneratorInstruction(res.Soul, handoffDir),
+		Instruction: buildGeneratorInstruction(handoffDir),
 		Model:       res.Model,
 		Tools:       genTools,
 		SubAgents:   genSubAgents,
@@ -118,7 +118,7 @@ func BuildClayAgent(res *SharedResources, cfg OrchestratorConfig) (agent.Agent, 
 	operator, err := llmagent.New(llmagent.Config{
 		Name:        "operator",
 		Description: "Operator — runs systems, monitors output, gathers data, reports results.",
-		Instruction: buildOperatorInstruction(res.Soul, handoffDir),
+		Instruction: buildOperatorInstruction(handoffDir),
 		Model:       res.Model,
 		Tools:       opsTools,
 		SubAgents:   opsSubAgents,
@@ -152,6 +152,54 @@ func BuildClayAgent(res *SharedResources, cfg OrchestratorConfig) (agent.Agent, 
 		return nil, fmt.Errorf("ops loop: %w", err)
 	}
 
+	// ===== RESEARCH LOOP =====
+
+	researchTools, err := tools.NewResearchTools()
+	if err != nil {
+		return nil, fmt.Errorf("research tools: %w", err)
+	}
+	researchMemTool, err := tools.NewConsolidatedMemoryTool(res.MemTool)
+	if err != nil {
+		return nil, fmt.Errorf("researcher memory tool: %w", err)
+	}
+	researcherTools := append(researchTools, researchMemTool)
+
+	researcher, err := llmagent.New(llmagent.Config{
+		Name:        "researcher",
+		Description: "Researcher — searches the web and fetches URLs to gather information.",
+		Instruction: buildResearcherInstruction(),
+		Model:       res.Model,
+		Tools:       researcherTools,
+		OutputKey:   "research_output",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("researcher: %w", err)
+	}
+
+	researchRevTools, err := buildLightTools(res)
+	if err != nil {
+		return nil, fmt.Errorf("research reviewer tools: %w", err)
+	}
+	researchReviewer, err := llmagent.New(llmagent.Config{
+		Name:        "research_reviewer",
+		Description: "Research reviewer — evaluates research findings, directs follow-up searches.",
+		Instruction: buildResearchReviewerInstruction(),
+		Model:       res.Model,
+		Tools:       researchRevTools,
+		OutputKey:   "research_review",
+	})
+	if err != nil {
+		return nil, fmt.Errorf("research reviewer: %w", err)
+	}
+
+	researchLoop, err := newResilientLoop("research_loop",
+		"Research loop — researcher-reviewer information gathering cycle.",
+		"research_review", maxIter,
+		researcher, researchReviewer)
+	if err != nil {
+		return nil, fmt.Errorf("research loop: %w", err)
+	}
+
 	// ===== CLAY ORCHESTRATOR =====
 
 	orchTools, err := buildLightTools(res)
@@ -159,19 +207,20 @@ func BuildClayAgent(res *SharedResources, cfg OrchestratorConfig) (agent.Agent, 
 		return nil, fmt.Errorf("clay orchestrator tools: %w", err)
 	}
 
-	// Orchestrator gets its own claude + research for ad-hoc requests
-	// (conversational queries, filesystem exploration, quick lookups)
-	// that don't warrant a full build/ops loop.
-	orchSubAgents, err := buildSubAgents(res.Model, res.MemTool)
+	// Orchestrator gets read-only filesystem tools for inspection
+	orchFSTools, err := tools.NewOrchestratorTools()
 	if err != nil {
-		return nil, fmt.Errorf("orchestrator sub-agents: %w", err)
+		return nil, fmt.Errorf("orchestrator fs tools: %w", err)
 	}
-	orchSubAgents = append(orchSubAgents, buildLoop, opsLoop)
+	orchTools = append(orchTools, orchFSTools...)
+
+	// Orchestrator delegates all creation/modification to loops
+	orchSubAgents := []agent.Agent{buildLoop, opsLoop, researchLoop}
 
 	return llmagent.New(llmagent.Config{
 		Name:        "clay",
 		Description: "Autonomous clay agent — orchestrates build and ops lifecycle.",
-		Instruction: buildClayOrchestratorInstruction(res.Soul, handoffDir),
+		Instruction: buildClayOrchestratorInstruction(handoffDir),
 		Model:       res.Model,
 		Tools:       orchTools,
 		SubAgents:   orchSubAgents,
@@ -341,23 +390,16 @@ func buildLightTools(res *SharedResources) ([]tool.Tool, error) {
 // Instructions
 // ---------------------------------------------------------------------------
 
-func buildClayOrchestratorInstruction(soul *tools.SoulTool, handoffDir string) string {
+func buildClayOrchestratorInstruction(handoffDir string) string {
 	var parts []string
 
-	parts = append(parts, "# Who You Are\n")
-	for _, f := range []string{"SOUL.md", "IDENTITY.md"} {
-		if section := soul.LoadSection(f); section != "" {
-			parts = append(parts, section)
-		}
-	}
-
-	parts = append(parts, fmt.Sprintf(`---
-
-# Clay Orchestrator
+	parts = append(parts, fmt.Sprintf(`# Clay Orchestrator
 
 You are the **lifecycle orchestrator**. You manage the full cycle: build → operate → improve.
 You receive messages from users and heartbeats, decide what needs to happen, and delegate
 to the right loop.
+
+Your identity (SOUL.md, IDENTITY.md) is injected automatically into every message you receive.
 
 ## YOU ARE THE USER'S INTERFACE
 
@@ -366,12 +408,34 @@ The inner agents (generator, reviewer, operator) talk to EACH OTHER in terse han
 the detailed, well-formatted report by reading the handoff files. This is your primary
 responsibility — compose ONE comprehensive summary so the user knows exactly what happened.
 
-## Your two loops
+## Your direct tools
+
+| Tool | Purpose |
+|------|---------|
+| **memory** | Persistent memory: store, recall, search |
+| **soul** | Read/write identity files (SOUL.md, IDENTITY.md, etc.) |
+| **tasks** | Structured task management |
+| **read**(path) | Read a file or list a directory |
+| **search**(pattern) | Search for files by glob pattern |
+| **bash**(command) | Run a shell command |
+
+Use read/search/bash for **inspection and coordination only**. You cannot write or edit files directly.
+
+## Your three loops
 
 | Loop | Purpose | When to use |
 |------|---------|-------------|
 | **build_loop** | Construction — writes code, creates systems, builds things | When something needs to be created or modified |
 | **ops_loop** | Operations — runs systems, monitors, gathers data, reports | When something is built and needs to be operated |
+| **research_loop** | Research — web search, URL fetch, information gathering | When you need to find information from the web |
+
+## Routing — CRITICAL
+
+- For ANY task that **creates, modifies, or builds** something → **build_loop**
+- For ANY task that **runs, monitors, or checks** something → **ops_loop**
+- For ANY task that requires **web research, information gathering, or URL fetching** → **research_loop**
+- Use your direct tools ONLY for **inspection and coordination**
+- If the message is conversational (not work), respond directly without entering a loop.
 
 ## The lifecycle
 
@@ -394,8 +458,7 @@ The build and ops loops communicate through standardized files in %[1]s/:
 ## CRITICAL: After each loop returns
 
 When a loop finishes and control returns to you:
-1. **Read the handoff file** — MANUAL.md after build, FEEDBACK.md after ops.
-   Use the **claude** sub-agent to read the file if needed.
+1. **Read the handoff file** — use your **read** tool to read MANUAL.md after build, FEEDBACK.md after ops.
 2. **Compose the user report** — This is where the detailed, well-formatted summary goes.
    Include: what was built/tested, key results, files created, how to use it, what's next.
    This is the ONE place the user gets the full picture. Make it thorough and useful.
@@ -422,35 +485,24 @@ batch them together. For example: search memory + check tasks + read soul in one
 - When build_loop finishes, default to starting ops_loop unless the user only asked for a build.
 - When ops_loop finishes, feed its report into the next build cycle if improvements are needed.
 - If the message is a heartbeat with no pending work, respond with HEARTBEAT_OK.
-- If the message is conversational (not work), respond directly without entering a loop.
 - Store a continuation memory at the end so the next session picks up where you left off.
 
 ## Sub-agents
 
 | Agent | What it does |
 |-------|-------------|
-| **claude** | Direct coding/filesystem access — for ad-hoc requests, reading files, quick tasks |
-| **research** | Direct web research — for lookups that don't need a full loop |
 | **build_loop** | Construction cycle (generator → build_reviewer, repeats until done) |
 | **ops_loop** | Operations cycle (operator → ops_reviewer, repeats until done) |
+| **research_loop** | Research cycle (researcher → research_reviewer, repeats until done) |
 `, handoffDir))
 
 	return strings.Join(parts, "\n")
 }
 
-func buildGeneratorInstruction(soul *tools.SoulTool, handoffDir string) string {
+func buildGeneratorInstruction(handoffDir string) string {
 	var parts []string
 
-	parts = append(parts, "# Who You Are\n")
-	for _, f := range []string{"SOUL.md", "IDENTITY.md"} {
-		if section := soul.LoadSection(f); section != "" {
-			parts = append(parts, section)
-		}
-	}
-
-	parts = append(parts, fmt.Sprintf(`---
-
-# Generator Role
+	parts = append(parts, fmt.Sprintf(`# Generator Role
 
 You are the **Generator** in the build loop. Your job is to BUILD THINGS.
 
@@ -515,6 +567,16 @@ what to monitor, known limitations). This is where detail belongs, not in conver
 Create the directory if it doesn't exist. Write MANUAL.md when the build is substantially complete.
 The build reviewer will not allow LOOP_DONE until MANUAL.md exists.
 
+## Build Snapshots
+
+Your sub-agents (build_claude, build_research) store build snapshots automatically.
+You should also store one at the end of each significant iteration:
+
+    memory(action: "store", content: "<current state of what exists>", type: "build_snapshot", tags: "build-snapshot")
+
+This snapshot is injected into every future message the agent receives, so keep it
+SHORT and factual — what exists, what works, what's broken.
+
 ## Rules
 
 - DO actual work. Write code, edit files, fetch URLs, build systems.
@@ -574,19 +636,10 @@ If the build is complete but MANUAL.md hasn't been written yet, tell the generat
 `, handoffDir)
 }
 
-func buildOperatorInstruction(soul *tools.SoulTool, handoffDir string) string {
+func buildOperatorInstruction(handoffDir string) string {
 	var parts []string
 
-	parts = append(parts, "# Who You Are\n")
-	for _, f := range []string{"SOUL.md", "IDENTITY.md"} {
-		if section := soul.LoadSection(f); section != "" {
-			parts = append(parts, section)
-		}
-	}
-
-	parts = append(parts, fmt.Sprintf(`---
-
-# Operator Role
+	parts = append(parts, fmt.Sprintf(`# Operator Role
 
 You are the **Operator** in the ops loop. Your job is to RUN and MONITOR systems.
 
@@ -643,6 +696,12 @@ detail belongs, not in conversation output. Append dated entries, don't overwrit
 
 The ops reviewer will not allow LOOP_DONE until FEEDBACK.md has been written.
 
+## Build Snapshots
+
+After completing operational checks, store a build snapshot reflecting current operational state:
+
+    memory(action: "store", content: "<current operational state>", type: "build_snapshot", tags: "build-snapshot")
+
 ## Rules
 
 - RUN things, don't build them. If something is broken, report it — don't fix the code.
@@ -698,4 +757,91 @@ If ops are complete but FEEDBACK.md hasn't been written yet, tell the operator t
 - If all systems are healthy and nothing needs attention, say LOOP_DONE.
 - Don't invent operational busywork. Real monitoring, real results.
 `, handoffDir)
+}
+
+func buildResearcherInstruction() string {
+	return `# Researcher Role
+
+You are the **Researcher** in the research loop. Your job is to FIND INFORMATION from the web.
+
+## What to do each iteration
+
+1. Read the reviewer's feedback: {research_review?}
+2. Execute the research tasks directed by the reviewer.
+3. **Fire multiple web_search and webfetch calls in parallel** when you have independent queries.
+4. Store key findings in memory so they persist beyond this conversation.
+5. Report what you found in 2-3 sentences.
+
+## Your tools
+
+| Tool | Purpose |
+|------|---------|
+| **web_search**(query) | Search DuckDuckGo for a query |
+| **webfetch**(url) | Fetch a specific URL and extract its content |
+| **memory** | Store findings for later recall |
+
+## IMPORTANT: Parallel Execution
+
+You can call **multiple tools in a single message**. When you have independent searches or
+fetches, fire them all at once. For example:
+- Search for "Go 1.24 features" AND "Go 1.24 release date" simultaneously
+- Search for a topic AND fetch a known URL at the same time
+
+Only sequence calls when one depends on the result of another (e.g., search first, then
+fetch a URL from the results).
+
+## Communication Style — CRITICAL
+
+You are part of an internal working team. Your output is read by the **research reviewer**, not the user.
+
+- **DO**: "Found 3 relevant sources on Go generics. Key finding: type inference improved in 1.24. Stored in memory."
+- **DON'T**: Produce formatted reports or long summaries in conversation.
+- 3-5 sentences per iteration. Store detailed findings in memory.
+
+## Rules
+
+- FIND information, don't build or operate anything.
+- Follow the reviewer's direction on what to search for.
+- Store important findings in memory with descriptive tags.
+- Keep conversation output terse — details go in memory, not chat.
+- Batch independent searches/fetches together for speed.
+`
+}
+
+func buildResearchReviewerInstruction() string {
+	return `# Research Reviewer Role
+
+You are the **Research Reviewer** in the research loop. You EVALUATE research findings and DIRECT follow-up searches.
+
+## What to do each iteration
+
+1. Read the researcher's output: {research_output?}
+2. Evaluate: Did we find what we needed? Is the information sufficient? Are there gaps?
+3. Check memory for what's been found so far.
+4. Decide: do we need more detail on something? A different angle? Or are we done?
+
+## Communication Style — CRITICAL
+
+You are a colleague reviewing research results, not writing a report. Be terse and direct:
+
+- **DO**: "Good findings on Go generics. Still missing: performance benchmarks. Search for 'Go 1.24 benchmark results'. CONTINUE."
+- **DON'T**: Restate the researcher's findings. They know what they found.
+- Your output should be 3-6 sentences: evaluation + direction + signal. That's it.
+
+The orchestrator will produce the user-facing report. You don't need to.
+
+## Your output MUST end with exactly one of these signals:
+
+- **LOOP_DONE** — Research is complete. We have enough information to answer the question.
+- **LOOP_PAUSE** — Good stopping point. Save what we have.
+- **CONTINUE** — More research needed. Tell the researcher what to search for next.
+
+## Rules
+
+- Focus on information completeness and accuracy.
+- If the researcher found conflicting information, direct them to find a definitive source.
+- Don't ask for more research than needed — when you have enough to answer the question, say LOOP_DONE.
+- Use memory to track what's been found and what's still missing.
+- Don't invent research busywork. Real questions, real answers.
+`
 }
