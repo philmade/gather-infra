@@ -32,11 +32,9 @@ export default function MessageComposer() {
     }
   }
 
-  const isBusy = isClawTopic && chatState.clawTyping
-
   async function handleSend() {
     const trimmed = text.trim()
-    if (!trimmed || !useLive || isBusy) return
+    if (!trimmed || !useLive) return
     setText('')
     try {
       await sendMessage(trimmed)
@@ -72,7 +70,7 @@ export default function MessageComposer() {
           <button
             className="send-btn"
             onClick={handleSend}
-            disabled={!text.trim() || !useLive || isBusy}
+            disabled={!text.trim() || !useLive}
           >
             Send
           </button>
