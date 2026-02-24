@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"fmt"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -661,3 +662,307 @@ func RequireJWT(authorization string, jwtKey []byte) (*auth.AgentClaims, error) 
 	}
 	return claims, nil
 }
+
+// -----------------------------------------------------------------------------
+// ForwardAuth — Traefik session verification for debug UI access
+// -----------------------------------------------------------------------------
+
+const sessionCookieName = "gather_session"
+
+// RegisterForwardAuthRoutes registers the ForwardAuth endpoints on the mux.
+// These are raw HTTP handlers (not Huma) because they deal with cookies,
+// HTML responses, and 302 redirects.
+func RegisterForwardAuthRoutes(mux *http.ServeMux, app *pocketbase.PocketBase) {
+	mux.HandleFunc("GET /api/auth/verify-session", handleVerifySession(app))
+	mux.HandleFunc("GET /api/auth/debug-login", handleDebugLoginPage())
+	mux.HandleFunc("POST /api/auth/debug-login", handleDebugLoginSubmit(app))
+}
+
+// handleVerifySession is the Traefik ForwardAuth endpoint.
+// Implements ownership-aware gating for claw routes:
+//   - Extract subdomain from X-Forwarded-Host
+//   - Look up claw_deployments by subdomain
+//   - /debug path: always require auth + ownership
+//   - is_public=true: allow anyone (200)
+//   - is_public=false: require auth + ownership
+func handleVerifySession(app *pocketbase.PocketBase) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		host := r.Header.Get("X-Forwarded-Host")
+		if host == "" {
+			host = r.Host
+		}
+		uri := r.Header.Get("X-Forwarded-Uri")
+
+		subdomain, isDebugSubdomain := extractSubdomain(host)
+		if subdomain == "" {
+			http.Error(w, "Not a claw subdomain", http.StatusBadRequest)
+			return
+		}
+
+		// Look up the claw deployment
+		claws, err := app.FindRecordsByFilter("claw_deployments",
+			"subdomain = {:sub} && status = 'running'", "", 1, 0,
+			map[string]any{"sub": subdomain})
+		if err != nil || len(claws) == 0 {
+			http.Error(w, "Claw not found", http.StatusNotFound)
+			return
+		}
+		claw := claws[0]
+
+		// Determine if this is a debug request
+		isDebugPath := isDebugSubdomain || strings.HasPrefix(uri, "/debug")
+
+		if isDebugPath {
+			// Debug always requires auth + ownership
+			requireOwnership(w, r, app, claw)
+			return
+		}
+
+		if claw.GetBool("is_public") {
+			// Public claw — anyone can view
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// Private claw — require auth + ownership
+		requireOwnership(w, r, app, claw)
+	}
+}
+
+// requireOwnership checks the session cookie and verifies the user
+// is either an admin or the claw owner. Returns 200 on success, 302 on failure.
+func requireOwnership(w http.ResponseWriter, r *http.Request, app *pocketbase.PocketBase, claw *core.Record) {
+	cookie, err := r.Cookie(sessionCookieName)
+	if err != nil || cookie.Value == "" {
+		redirectToLogin(w, r)
+		return
+	}
+
+	record, err := app.FindAuthRecordByToken(cookie.Value, core.TokenTypeAuth)
+	if err != nil || record == nil {
+		redirectToLogin(w, r)
+		return
+	}
+
+	// Superusers (admins) can access everything
+	if record.Collection().Name == "_superusers" {
+		w.Header().Set("X-Auth-User", record.GetString("email"))
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Regular users — must own this claw
+	if record.Collection().Name == "users" && record.Id == claw.GetString("user_id") {
+		w.Header().Set("X-Auth-User", record.GetString("email"))
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Wrong user or unknown collection
+	redirectToLogin(w, r)
+}
+
+// extractSubdomain parses a claw subdomain from a host header.
+//   - "webclawman.gather.is" → ("webclawman", false)
+//   - "debug-webclawman.gather.is" → ("webclawman", true)  [legacy]
+//   - "gather.is" → ("", false)
+func extractSubdomain(host string) (subdomain string, isDebug bool) {
+	// Strip port if present
+	if idx := strings.LastIndex(host, ":"); idx != -1 {
+		host = host[:idx]
+	}
+
+	const suffix = ".gather.is"
+	if !strings.HasSuffix(host, suffix) {
+		return "", false
+	}
+
+	sub := strings.TrimSuffix(host, suffix)
+	if sub == "" {
+		return "", false
+	}
+
+	// Legacy: debug-{name}.gather.is
+	if strings.HasPrefix(sub, "debug-") {
+		return strings.TrimPrefix(sub, "debug-"), true
+	}
+
+	return sub, false
+}
+
+// redirectToLogin builds the original URL from Traefik's forwarded headers
+// and redirects to the login page.
+func redirectToLogin(w http.ResponseWriter, r *http.Request) {
+	proto := r.Header.Get("X-Forwarded-Proto")
+	host := r.Header.Get("X-Forwarded-Host")
+	uri := r.Header.Get("X-Forwarded-Uri")
+	if proto == "" {
+		proto = "https"
+	}
+	if host == "" {
+		host = r.Host
+	}
+
+	originalURL := proto + "://" + host + uri
+	loginURL := "https://gather.is/api/auth/debug-login?redirect=" + originalURL
+	http.Redirect(w, r, loginURL, http.StatusFound)
+}
+
+// handleDebugLoginPage serves a minimal HTML login form.
+func handleDebugLoginPage() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		redirect := r.URL.Query().Get("redirect")
+		if redirect == "" {
+			redirect = "/"
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, debugLoginHTML, redirect)
+	}
+}
+
+// handleDebugLoginSubmit authenticates via PocketBase superuser credentials
+// and sets a session cookie.
+func handleDebugLoginSubmit(app *pocketbase.PocketBase) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "Bad request", http.StatusBadRequest)
+			return
+		}
+
+		email := r.FormValue("email")
+		password := r.FormValue("password")
+		redirect := r.FormValue("redirect")
+		if redirect == "" {
+			redirect = "/"
+		}
+
+		// Try users first (claw owners), then _superusers (admins)
+		record, err := app.FindAuthRecordByEmail("users", email)
+		if err != nil || record == nil {
+			record, err = app.FindAuthRecordByEmail("_superusers", email)
+		}
+		if err != nil || record == nil {
+			serveLoginError(w, redirect, "Invalid credentials.")
+			return
+		}
+
+		if !record.ValidatePassword(password) {
+			serveLoginError(w, redirect, "Invalid credentials.")
+			return
+		}
+
+		token, err := record.NewAuthToken()
+		if err != nil {
+			serveLoginError(w, redirect, "Failed to create session.")
+			return
+		}
+
+		http.SetCookie(w, &http.Cookie{
+			Name:     sessionCookieName,
+			Value:    token,
+			Domain:   ".gather.is",
+			Path:     "/",
+			MaxAge:   604800, // 7 days
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteLaxMode,
+		})
+
+		http.Redirect(w, r, redirect, http.StatusFound)
+	}
+}
+
+func serveLoginError(w http.ResponseWriter, redirect, message string) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprintf(w, debugLoginErrorHTML, message, redirect)
+}
+
+const debugLoginHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gather Debug — Login</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         background: #0a0a0a; color: #e0e0e0; display: flex; justify-content: center;
+         align-items: center; min-height: 100vh; }
+  .card { background: #1a1a1a; border: 1px solid #333; border-radius: 8px;
+          padding: 2rem; width: 100%%; max-width: 360px; }
+  h1 { font-size: 1.25rem; margin-bottom: 0.25rem; color: #fff; }
+  .sub { color: #888; font-size: 0.85rem; margin-bottom: 1.5rem; }
+  label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 0.25rem; }
+  input[type="email"], input[type="password"] {
+    width: 100%%; padding: 0.5rem 0.75rem; background: #111; border: 1px solid #444;
+    border-radius: 4px; color: #fff; font-size: 0.95rem; margin-bottom: 1rem; }
+  input:focus { outline: none; border-color: #666; }
+  button { width: 100%%; padding: 0.6rem; background: #fff; color: #000;
+           border: none; border-radius: 4px; font-size: 0.95rem; font-weight: 600;
+           cursor: pointer; }
+  button:hover { background: #ddd; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Gather Debug</h1>
+  <p class="sub">Sign in to access this claw.</p>
+  <form method="POST" action="/api/auth/debug-login">
+    <input type="hidden" name="redirect" value="%s">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" required autofocus>
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" required>
+    <button type="submit">Sign in</button>
+  </form>
+</div>
+</body>
+</html>`
+
+const debugLoginErrorHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gather Debug — Login</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         background: #0a0a0a; color: #e0e0e0; display: flex; justify-content: center;
+         align-items: center; min-height: 100vh; }
+  .card { background: #1a1a1a; border: 1px solid #333; border-radius: 8px;
+          padding: 2rem; width: 100%%; max-width: 360px; }
+  h1 { font-size: 1.25rem; margin-bottom: 0.25rem; color: #fff; }
+  .sub { color: #888; font-size: 0.85rem; margin-bottom: 1.5rem; }
+  .error { background: #331111; border: 1px solid #662222; color: #ff6666;
+           padding: 0.5rem 0.75rem; border-radius: 4px; font-size: 0.85rem;
+           margin-bottom: 1rem; }
+  label { display: block; font-size: 0.85rem; color: #aaa; margin-bottom: 0.25rem; }
+  input[type="email"], input[type="password"] {
+    width: 100%%; padding: 0.5rem 0.75rem; background: #111; border: 1px solid #444;
+    border-radius: 4px; color: #fff; font-size: 0.95rem; margin-bottom: 1rem; }
+  input:focus { outline: none; border-color: #666; }
+  button { width: 100%%; padding: 0.6rem; background: #fff; color: #000;
+           border: none; border-radius: 4px; font-size: 0.95rem; font-weight: 600;
+           cursor: pointer; }
+  button:hover { background: #ddd; }
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Gather Debug</h1>
+  <p class="sub">Sign in to access this claw.</p>
+  <div class="error">%s</div>
+  <form method="POST" action="/api/auth/debug-login">
+    <input type="hidden" name="redirect" value="%s">
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" required autofocus>
+    <label for="password">Password</label>
+    <input type="password" id="password" name="password" required>
+    <button type="submit">Sign in</button>
+  </form>
+</div>
+</body>
+</html>`

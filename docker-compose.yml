@@ -129,6 +129,11 @@ services:
       - "traefik.http.routers.auth-api.tls.certresolver=cf"
       - "traefik.http.routers.auth-api.priority=10"
       - "traefik.http.services.auth-api.loadbalancer.server.port=8090"
+      # ForwardAuth middleware — used by claw routers for public/private + ownership gating
+      - "traefik.http.middlewares.gather-forward-auth.forwardauth.address=http://gather-auth:8090/api/auth/verify-session"
+      - "traefik.http.middlewares.gather-forward-auth.forwardauth.trustForwardHeader=true"
+      # StripPrefix middleware — strips /debug before forwarding to ADK debugger on port 8081
+      - "traefik.http.middlewares.claw-debug-strip.stripprefix.prefixes=/debug"
 
   # === Frontend ===
 

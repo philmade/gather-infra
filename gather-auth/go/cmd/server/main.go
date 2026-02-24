@@ -117,6 +117,8 @@ func main() {
 		if tinodeWsURL == "" {
 			tinodeWsURL = "ws://localhost:6060/v0/channels"
 		}
+		gatherapi.RegisterForwardAuthRoutes(mux, app)
+
 		gatherapi.RegisterChannelRoutes(api, app, jwtKey, gatherapi.TinodeConfig{
 			WsURL:     tinodeWsURL,
 			PwdSecret: os.Getenv("TINODE_PASSWORD_SECRET"),
@@ -135,6 +137,8 @@ func main() {
 			"/openapi.json", "/openapi.yaml",
 			"/schemas/{path...}",
 			"/api/auth/health",
+			"/api/auth/verify-session",
+			"/api/auth/debug-login",
 			"/api/agents",
 			"/api/agents/{path...}",
 			"/help",
@@ -1540,14 +1544,22 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 	// Persistent data volume for memory DB and soul files
 	dataVolume := fmt.Sprintf("claw-data-%s", subdomain)
 
-	// Traefik labels for dynamic routing: {subdomain}.gather.is → container:8080
+	// Traefik labels for dynamic routing
 	routerName := "claw-" + subdomain
 	labels := map[string]string{
 		"traefik.enable": "true",
+		// Main: {subdomain}.gather.is → port 8080 (proxy), with ForwardAuth
 		"traefik.http.routers." + routerName + ".rule":             "Host(`" + subdomain + ".gather.is`)",
 		"traefik.http.routers." + routerName + ".entrypoints":      "websecure",
 		"traefik.http.routers." + routerName + ".tls.certresolver": "cf",
+		"traefik.http.routers." + routerName + ".middlewares":      "gather-forward-auth",
 		"traefik.http.services." + routerName + ".loadbalancer.server.port": "8080",
+		// Debug: {subdomain}.gather.is/debug → port 8081 (ADK), with ForwardAuth + StripPrefix
+		"traefik.http.routers." + routerName + "-debug.rule":             "Host(`" + subdomain + ".gather.is`) && PathPrefix(`/debug`)",
+		"traefik.http.routers." + routerName + "-debug.entrypoints":      "websecure",
+		"traefik.http.routers." + routerName + "-debug.tls.certresolver": "cf",
+		"traefik.http.routers." + routerName + "-debug.middlewares":      "gather-forward-auth,claw-debug-strip",
+		"traefik.http.services." + routerName + "-debug.loadbalancer.server.port": "8081",
 	}
 
 	ctx := context.Background()
