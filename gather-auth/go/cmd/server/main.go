@@ -1553,12 +1553,14 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 		"traefik.http.routers." + routerName + ".entrypoints":      "websecure",
 		"traefik.http.routers." + routerName + ".tls.certresolver": "cf",
 		"traefik.http.routers." + routerName + ".middlewares":      "gather-forward-auth",
+		"traefik.http.routers." + routerName + ".service":          routerName,
 		"traefik.http.services." + routerName + ".loadbalancer.server.port": "8080",
 		// Debug: {subdomain}.gather.is/debug → port 8081 (ADK), with ForwardAuth + StripPrefix
 		"traefik.http.routers." + routerName + "-debug.rule":             "Host(`" + subdomain + ".gather.is`) && PathPrefix(`/debug`)",
 		"traefik.http.routers." + routerName + "-debug.entrypoints":      "websecure",
 		"traefik.http.routers." + routerName + "-debug.tls.certresolver": "cf",
 		"traefik.http.routers." + routerName + "-debug.middlewares":      "gather-forward-auth,claw-debug-strip",
+		"traefik.http.routers." + routerName + "-debug.service":          routerName + "-debug",
 		"traefik.http.services." + routerName + "-debug.loadbalancer.server.port": "8081",
 	}
 

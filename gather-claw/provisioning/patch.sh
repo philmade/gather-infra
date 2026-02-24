@@ -98,17 +98,19 @@ patch_container() {
         RESTART="unless-stopped"
     fi
 
-    # Add ForwardAuth to main claw router (public/private + ownership check)
+    # Add ForwardAuth to main claw router + explicit service link
     local USERNAME="${CONTAINER#claw-}"
     local MAIN_ROUTER="claw-${USERNAME}"
     local DEBUG_ROUTER="claw-${USERNAME}-debug"
     LABEL_ARGS="$LABEL_ARGS -l $(printf '%q' "traefik.http.routers.${MAIN_ROUTER}.middlewares=gather-forward-auth")"
+    LABEL_ARGS="$LABEL_ARGS -l $(printf '%q' "traefik.http.routers.${MAIN_ROUTER}.service=${MAIN_ROUTER}")"
 
     # Debug: path-based (/debug) with ForwardAuth + StripPrefix → port 8081
     LABEL_ARGS="$LABEL_ARGS -l $(printf '%q' "traefik.http.routers.${DEBUG_ROUTER}.rule=Host(\`${USERNAME}.gather.is\`) && PathPrefix(\`/debug\`)")"
     LABEL_ARGS="$LABEL_ARGS -l $(printf '%q' "traefik.http.routers.${DEBUG_ROUTER}.entrypoints=websecure")"
     LABEL_ARGS="$LABEL_ARGS -l $(printf '%q' "traefik.http.routers.${DEBUG_ROUTER}.tls.certresolver=cf")"
     LABEL_ARGS="$LABEL_ARGS -l $(printf '%q' "traefik.http.routers.${DEBUG_ROUTER}.middlewares=gather-forward-auth,claw-debug-strip")"
+    LABEL_ARGS="$LABEL_ARGS -l $(printf '%q' "traefik.http.routers.${DEBUG_ROUTER}.service=${DEBUG_ROUTER}")"
     LABEL_ARGS="$LABEL_ARGS -l $(printf '%q' "traefik.http.services.${DEBUG_ROUTER}.loadbalancer.server.port=8081")"
 
     echo "[PATCH] Config captured:"
