@@ -20,9 +20,9 @@ type Middleware struct {
 	appName string
 }
 
-// NewMiddleware creates a middleware instance targeting the "clawpoint" app.
+// NewMiddleware creates a middleware instance targeting the "clay" app.
 func NewMiddleware(adkURL string) *Middleware {
-	return NewMiddlewareForApp(adkURL, "clawpoint")
+	return NewMiddlewareForApp(adkURL, "clay")
 }
 
 // NewMiddlewareForApp creates a middleware instance targeting the specified ADK app.

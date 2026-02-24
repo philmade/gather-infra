@@ -49,13 +49,13 @@ func NewMatterbridgeConnector(adkURL string) *MatterbridgeConnector {
 	return &MatterbridgeConnector{
 		mbURL:         "http://localhost:4242",
 		adkURL:        adkURL,
-		appName:       "claw",
+		appName:       "clay",
 		gateway:       "clawpoint",
 		botName:       "ClawPoint-Go",
 		telegramToken: os.Getenv("TELEGRAM_BOT"),
 		httpClient:    &http.Client{Timeout: 120 * time.Second},
 		sessions:      make(map[string]string),
-		middleware:    NewMiddlewareForApp(adkURL, "claw"),
+		middleware:    NewMiddlewareForApp(adkURL, "clay"),
 	}
 }
 

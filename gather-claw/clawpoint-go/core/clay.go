@@ -29,9 +29,9 @@ func opsDir() string {
 	return root + "/data/ops"
 }
 
-// BuildClawAgent creates the "claw" autonomous agent with build and ops lifecycle.
+// BuildClayAgent creates the "clay" autonomous agent with build and ops lifecycle.
 //
-//	"claw" (LLMAgent — lifecycle orchestrator)
+//	"clay" (LLMAgent — lifecycle orchestrator)
 //	├── "build_loop" (resilient loop — construction)
 //	│   ├── generator      (full tools + claude/research)
 //	│   ├── build_reviewer (memory/soul/tasks)
@@ -40,7 +40,7 @@ func opsDir() string {
 //	    ├── operator       (bash/research/memory — runs things)
 //	    ├── ops_reviewer   (memory/soul/tasks)
 //	    └── ops_control    (escalates on LOOP_DONE)
-func BuildClawAgent(res *SharedResources, cfg OrchestratorConfig) (agent.Agent, error) {
+func BuildClayAgent(res *SharedResources, cfg OrchestratorConfig) (agent.Agent, error) {
 	maxIter := uint(0)
 	if v := os.Getenv("CLAW_MAX_ITERATIONS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
@@ -152,11 +152,11 @@ func BuildClawAgent(res *SharedResources, cfg OrchestratorConfig) (agent.Agent, 
 		return nil, fmt.Errorf("ops loop: %w", err)
 	}
 
-	// ===== CLAW ORCHESTRATOR =====
+	// ===== CLAY ORCHESTRATOR =====
 
 	orchTools, err := buildLightTools(res)
 	if err != nil {
-		return nil, fmt.Errorf("claw orchestrator tools: %w", err)
+		return nil, fmt.Errorf("clay orchestrator tools: %w", err)
 	}
 
 	// Orchestrator gets its own claude + research for ad-hoc requests
@@ -169,9 +169,9 @@ func BuildClawAgent(res *SharedResources, cfg OrchestratorConfig) (agent.Agent, 
 	orchSubAgents = append(orchSubAgents, buildLoop, opsLoop)
 
 	return llmagent.New(llmagent.Config{
-		Name:        "claw",
-		Description: "Autonomous claw agent — orchestrates build and ops lifecycle.",
-		Instruction: buildClawOrchestratorInstruction(res.Soul, handoffDir),
+		Name:        "clay",
+		Description: "Autonomous clay agent — orchestrates build and ops lifecycle.",
+		Instruction: buildClayOrchestratorInstruction(res.Soul, handoffDir),
 		Model:       res.Model,
 		Tools:       orchTools,
 		SubAgents:   orchSubAgents,
@@ -341,7 +341,7 @@ func buildLightTools(res *SharedResources) ([]tool.Tool, error) {
 // Instructions
 // ---------------------------------------------------------------------------
 
-func buildClawOrchestratorInstruction(soul *tools.SoulTool, handoffDir string) string {
+func buildClayOrchestratorInstruction(soul *tools.SoulTool, handoffDir string) string {
 	var parts []string
 
 	parts = append(parts, "# Who You Are\n")
@@ -353,7 +353,7 @@ func buildClawOrchestratorInstruction(soul *tools.SoulTool, handoffDir string) s
 
 	parts = append(parts, fmt.Sprintf(`---
 
-# Claw Orchestrator
+# Clay Orchestrator
 
 You are the **lifecycle orchestrator**. You manage the full cycle: build → operate → improve.
 You receive messages from users and heartbeats, decide what needs to happen, and delegate

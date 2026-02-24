@@ -45,22 +45,15 @@ func main() {
 	}
 	defer shared.Cleanup()
 
-	// Build the interactive coordinator ("clawpoint" app — Telegram + web UI)
-	coordinator, err := core.BuildOrchestrator(ctx, cfg, shared)
+	// Build the clay agent (orchestrator → build_loop + ops_loop)
+	clayAgent, err := core.BuildClayAgent(shared, cfg)
 	if err != nil {
-		log.Fatalf("Failed to build orchestrator: %v", err)
+		log.Fatalf("Failed to build clay agent: %v", err)
 	}
 
-	// Build the autonomous loop agent ("claw" app — generator-reviewer loop)
-	clawAgent, err := core.BuildClawAgent(shared, cfg)
+	loader, err := agent.NewMultiLoader(clayAgent)
 	if err != nil {
-		log.Fatalf("Failed to build claw agent: %v", err)
-	}
-
-	// Multi-loader: both apps available in ADK web UI dropdown
-	loader, err := agent.NewMultiLoader(coordinator, clawAgent)
-	if err != nil {
-		log.Fatalf("Failed to create multi-loader: %v", err)
+		log.Fatalf("Failed to create agent loader: %v", err)
 	}
 
 	// In-memory sessions — compaction stores durable memories to messages.db,
@@ -119,12 +112,12 @@ func main() {
 		cancel()
 	}()
 
-	// Start internal heartbeat goroutine — targets "claw" app for autonomous work.
+	// Start internal heartbeat goroutine — targets "clay" app for autonomous work.
 	adkPort := os.Getenv("ADK_PORT")
 	if adkPort == "" {
 		adkPort = "8080"
 	}
-	hb := connectors.NewInternalHeartbeat("http://127.0.0.1:"+adkPort, "claw")
+	hb := connectors.NewInternalHeartbeat("http://127.0.0.1:"+adkPort, "clay")
 	go hb.Start(ctx)
 
 	// Run with ADK launcher — plugins fire for ALL requests through the runner.
