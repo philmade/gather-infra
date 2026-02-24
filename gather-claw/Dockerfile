@@ -16,7 +16,7 @@ RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o clawpoint-proxy ./cmd/
 # === Stage 2: Runtime ===
 FROM alpine:3.19
 
-RUN apk add --no-cache matterbridge ca-certificates bash curl jq
+RUN apk add --no-cache matterbridge ca-certificates bash curl jq python3
 
 WORKDIR /app
 

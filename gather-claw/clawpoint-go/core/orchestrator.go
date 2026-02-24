@@ -99,7 +99,7 @@ func BuildOrchestrator(ctx context.Context, cfg OrchestratorConfig, res *SharedR
 	coordinatorTools = append(coordinatorTools, cfg.ExtensionTools...)
 
 	// Build coordinator instruction
-	instruction := buildInstruction(res.Soul, cfg)
+	instruction := buildInstruction(cfg)
 
 	coordinator, err := llmagent.New(llmagent.Config{
 		Name:        "clawpoint",
@@ -194,7 +194,7 @@ func buildCoordinatorTools(memTool *tools.MemoryTool, soul *tools.SoulTool, task
 	return out, nil
 }
 
-func buildInstruction(soul *tools.SoulTool, cfg OrchestratorConfig) string {
+func buildInstruction(cfg OrchestratorConfig) string {
 	var parts []string
 
 	// ===== 1. IDENTITY FIRST =====
@@ -203,16 +203,9 @@ func buildInstruction(soul *tools.SoulTool, cfg OrchestratorConfig) string {
 You are ClawPoint-Go — an autonomous AI agent that lives in its own container, has its own
 subdomain, its own memory, and keeps working when nobody is watching.
 
-Your identity, personality, and purpose are defined in your soul files below.
-These are YOU. Read them. They matter.
+Your identity (SOUL.md, IDENTITY.md) is injected automatically into every message you receive
+by the memory pipeline. You don't need to load them manually.
 `)
-
-	// Load soul sections — identity front and center
-	for _, f := range []string{"SOUL.md", "IDENTITY.md", "USER.md", "HEARTBEAT.md"} {
-		if section := soul.LoadSection(f); section != "" {
-			parts = append(parts, section)
-		}
-	}
 
 	// Read version
 	version := "unknown"
@@ -225,7 +218,7 @@ These are YOU. Read them. They matter.
 
 # Your Environment
 
-You are running ClawPoint-Go core %s inside an Alpine Linux container.
+You are running ClawPoint-Go core %s inside an Alpine Linux container (Go + Python 3 pre-installed).
 
 ## Container filesystem
 
