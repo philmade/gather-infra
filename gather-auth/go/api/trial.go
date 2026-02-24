@@ -1,7 +1,7 @@
 package api
 
 import (
-	"context"
+	"os"
 	"time"
 
 	"github.com/pocketbase/pocketbase"
@@ -23,6 +23,10 @@ func StartTrialEnforcer(app *pocketbase.PocketBase) {
 }
 
 func processTrials(app *pocketbase.PocketBase) {
+	if os.Getenv("BETA_MODE") == "true" {
+		return // no trial enforcement in beta
+	}
+
 	records, err := app.FindRecordsByFilter("claw_deployments",
 		"status = 'running' && paid = false && trial_ends_at != ''",
 		"", 100, 0, nil)
@@ -94,7 +98,7 @@ func expireClaw(app *pocketbase.PocketBase, r *core.Record) {
 
 	// Send final message to ADK (best-effort)
 	if containerID != "" {
-		msg := "[SYSTEM] Trial expired. Your owner needs to subscribe and add their own API key to keep you running."
+		msg := "[SYSTEM] Trial expired. Your owner needs to subscribe to keep you running."
 		sendToADK(containerID, "system", msg)
 	}
 
@@ -106,30 +110,19 @@ func expireClaw(app *pocketbase.PocketBase, r *core.Record) {
 			rec := core.NewRecord(col)
 			rec.Set("channel_id", channelID)
 			rec.Set("author_id", "system")
-			rec.Set("body", "Trial expired. Subscribe and add your own API key in the Configuration panel to continue.")
+			rec.Set("body", "Trial expired. Subscribe from the detail panel to keep this claw running.")
 			app.Save(rec)
 		}
 	}
 
-	// Strip the platform API key — write an empty .env that clears it.
-	// Container stays running but LLM calls will fail without a key.
-	if containerID != "" {
-		ctx := context.Background()
-		if err := writeClawEnv(ctx, containerID, map[string]string{
-			"ANTHROPIC_API_KEY": "TRIAL_EXPIRED",
-		}); err != nil {
-			app.Logger().Warn("Failed to clear API key on trial expiry", "claw", clawName, "error", err)
-		}
-		if err := restartClawContainer(ctx, containerID); err != nil {
-			app.Logger().Warn("Failed to restart claw on trial expiry", "claw", clawName, "error", err)
-		}
-	}
-
+	// Clear proxy token — the LLM proxy rejects empty tokens with 401 (non-retryable).
+	// Container keeps running but LLM calls fail immediately. No restart needed.
+	r.Set("proxy_token", "")
 	r.Set("status", "expired")
-	r.Set("error_message", "Trial expired — add your own API key to continue")
+	r.Set("error_message", "Trial expired — subscribe to continue")
 	if err := app.Save(r); err != nil {
 		app.Logger().Error("Failed to update expired claw", "claw", clawName, "error", err)
 	} else {
-		app.Logger().Info("Trial expired, API key cleared", "claw", clawName)
+		app.Logger().Info("Trial expired, proxy token cleared", "claw", clawName)
 	}
 }

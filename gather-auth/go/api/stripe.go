@@ -84,10 +84,16 @@ func stripeEnv(key string) string {
 	return os.Getenv(key)
 }
 
-// clawPriceID returns the Stripe Price ID for a claw subscription.
-// Single price — users BYOK their own LLM API keys.
-func clawPriceID(_ string) string {
-	return stripeEnv("STRIPE_PRICE_MONTHLY")
+// clawPriceID returns the Stripe Price ID for a claw subscription tier.
+func clawPriceID(clawType string) string {
+	switch clawType {
+	case "pro":
+		return stripeEnv("STRIPE_PRICE_PRO")
+	case "max":
+		return stripeEnv("STRIPE_PRICE_MAX")
+	default: // "lite" or anything else
+		return stripeEnv("STRIPE_PRICE_LITE")
+	}
 }
 
 func CreateCheckoutSession(app *pocketbase.PocketBase) func(ctx context.Context, input *CreateCheckoutInput) (*CreateCheckoutOutput, error) {

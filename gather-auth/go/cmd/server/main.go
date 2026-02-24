@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
@@ -118,6 +119,7 @@ func main() {
 			tinodeWsURL = "ws://localhost:6060/v0/channels"
 		}
 		gatherapi.RegisterForwardAuthRoutes(mux, app)
+		gatherapi.RegisterLLMProxyRoutes(mux, app)
 
 		gatherapi.RegisterChannelRoutes(api, app, jwtKey, gatherapi.TinodeConfig{
 			WsURL:     tinodeWsURL,
@@ -126,6 +128,7 @@ func main() {
 
 		gatherapi.StartHeartbeat(app)
 		gatherapi.StartTrialEnforcer(app)
+		gatherapi.StartUsageCleanup(app)
 
 		// Delegate Huma-managed paths to the Huma mux
 		delegate := func(re *core.RequestEvent) error {
@@ -170,6 +173,7 @@ func main() {
 			"/api/claws",
 			"/api/claws/{path...}",
 			"/api/stripe/{path...}",
+			"/api/llm/{path...}",
 			"/discover",
 		} {
 			e.Router.Any(p, delegate)
@@ -311,6 +315,9 @@ func ensureCollections(app *pocketbase.PocketBase) error {
 		return err
 	}
 	if err := ensureClawSecretsCollection(app); err != nil {
+		return err
+	}
+	if err := ensureClawUsageCollection(app); err != nil {
 		return err
 	}
 	if err := ensureUserFields(app); err != nil {
@@ -1396,10 +1403,14 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 	record.Set("subdomain", subdomain)
 	record.Set("status", "provisioning")
 	record.Set("container_id", containerName)
-	if isFreeTier {
+	if isFreeTier || os.Getenv("BETA_MODE") == "true" {
 		record.Set("paid", true)
 		record.Set("trial_ends_at", "")
-		app.Logger().Info("Free tier grant applied", "user_id", userID, "claw", clawDisplayName)
+		if isFreeTier {
+			app.Logger().Info("Free tier grant applied", "user_id", userID, "claw", clawDisplayName)
+		} else {
+			app.Logger().Info("Beta mode: skipping payment", "user_id", userID, "claw", clawDisplayName)
+		}
 	} else {
 		record.Set("trial_ends_at", time.Now().Add(30*time.Minute).UTC().Format(time.RFC3339))
 		record.Set("paid", false)
@@ -1518,22 +1529,36 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 		"GATHER_CHANNEL_ID": channelID,
 		"GATHER_BASE_URL":   baseURL,
 	}
-	if v := os.Getenv("CLAW_LLM_API_KEY"); v != "" {
-		envMap["ANTHROPIC_API_KEY"] = v
+	// LLM proxy — claw talks to gather-auth, not directly to upstream
+	proxyTokenBytes := make([]byte, 32)
+	if _, err := rand.Read(proxyTokenBytes); err != nil {
+		app.Logger().Error("Failed to generate proxy token", "id", record.Id, "error", err)
+		record.Set("status", "failed")
+		record.Set("error_message", "proxy token generation failed")
+		app.Save(record)
+		return
 	}
-	if v := os.Getenv("CLAW_ANTHROPIC_API_BASE"); v != "" {
-		envMap["ANTHROPIC_API_BASE"] = v
+	proxyToken := hex.EncodeToString(proxyTokenBytes)
+	record.Set("proxy_token", proxyToken)
+	if err := app.Save(record); err != nil {
+		app.Logger().Error("Failed to save proxy token", "id", record.Id, "error", err)
 	}
+	envMap["ANTHROPIC_API_KEY"] = proxyToken
+	envMap["ANTHROPIC_API_BASE"] = "http://gather-auth:8090/api/llm"
 	if v := os.Getenv("CLAW_LLM_MODEL"); v != "" {
 		envMap["ANTHROPIC_MODEL"] = v
 	}
 
-	// Inject user's vault secrets (overrides host defaults)
+	// Inject user's vault secrets (overrides host defaults, but NOT ANTHROPIC_API_KEY/BASE)
 	secrets, _ := app.FindRecordsByFilter("claw_secrets",
 		"user_id = {:uid}", "", 100, 0,
 		map[string]any{"uid": userID})
 	for _, s := range secrets {
-		envMap[s.GetString("key")] = s.GetString("value")
+		key := s.GetString("key")
+		if key == "ANTHROPIC_API_KEY" || key == "ANTHROPIC_API_BASE" {
+			continue // proxy is mandatory — no BYOK override
+		}
+		envMap[key] = s.GetString("value")
 	}
 
 	var envSlice []string
@@ -1686,6 +1711,29 @@ func ensureClawSecretsCollection(app *pocketbase.PocketBase) error {
 	return nil
 }
 
+func ensureClawUsageCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("claw_usage")
+	if err == nil {
+		return nil // already exists
+	}
+
+	c := core.NewBaseCollection("claw_usage")
+	c.Fields.Add(
+		&core.TextField{Name: "claw_id", Required: true, Max: 50},
+		&core.NumberField{Name: "input_tokens"},
+		&core.NumberField{Name: "output_tokens"},
+		&core.TextField{Name: "model", Max: 100},
+		&core.AutodateField{Name: "created", OnCreate: true},
+	)
+	c.AddIndex("idx_usage_claw_created", false, "claw_id, created", "")
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create claw_usage collection: %w", err)
+	}
+	app.Logger().Info("Created claw_usage collection")
+	return nil
+}
+
 func ensureClawDeploymentsCollection(app *pocketbase.PocketBase) error {
 	c, err := app.FindCollectionByNameOrId("claw_deployments")
 	if err == nil {
@@ -1735,11 +1783,20 @@ func ensureClawDeploymentsCollection(app *pocketbase.PocketBase) error {
 			c.Fields.Add(&core.BoolField{Name: "trial_warned"})
 			changed = true
 		}
+		if c.Fields.GetByName("proxy_token") == nil {
+			c.Fields.Add(&core.TextField{Name: "proxy_token", Max: 64})
+			changed = true
+		}
 		if changed {
 			if err := app.Save(c); err != nil {
 				return fmt.Errorf("migrate claw_deployments collection: %w", err)
 			}
 			app.Logger().Info("Migrated claw_deployments collection")
+		}
+		// Ensure proxy_token index exists
+		c.AddIndex("idx_claw_proxy_token", false, "proxy_token", "")
+		if err := app.Save(c); err != nil {
+			app.Logger().Warn("Failed to add proxy_token index (may already exist)", "error", err)
 		}
 		return nil
 	}
@@ -1766,9 +1823,11 @@ func ensureClawDeploymentsCollection(app *pocketbase.PocketBase) error {
 		&core.TextField{Name: "trial_ends_at", Max: 30},
 		&core.TextField{Name: "stripe_session_id", Max: 200},
 		&core.BoolField{Name: "trial_warned"},
+		&core.TextField{Name: "proxy_token", Max: 64},
 		&core.AutodateField{Name: "created", OnCreate: true},
 	)
 	c.AddIndex("idx_claw_user", false, "user_id", "")
+	c.AddIndex("idx_claw_proxy_token", false, "proxy_token", "")
 
 	if err := app.Save(c); err != nil {
 		return fmt.Errorf("create claw_deployments collection: %w", err)
