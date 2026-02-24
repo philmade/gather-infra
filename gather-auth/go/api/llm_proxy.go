@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pocketbase/pocketbase"
@@ -97,7 +98,9 @@ func handleLLMProxy(app *pocketbase.PocketBase) http.HandlerFunc {
 		}
 		upstreamKey := os.Getenv("LLM_UPSTREAM_KEY")
 
-		upReq, err := http.NewRequestWithContext(r.Context(), "POST", upstreamURL,
+		// Append /v1/messages — LLM_UPSTREAM_URL is the base (e.g. https://api.minimax.io/anthropic)
+		upstreamFull := strings.TrimRight(upstreamURL, "/") + "/v1/messages"
+		upReq, err := http.NewRequestWithContext(r.Context(), "POST", upstreamFull,
 			bytes.NewReader(body))
 		if err != nil {
 			writeAnthropicError(w, 500, "api_error", "Failed to create upstream request")
