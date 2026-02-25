@@ -1105,49 +1105,58 @@ func handleWorkspaceInvite(app *pocketbase.PocketBase, re *core.RequestEvent, ti
 
 	ctx := context.Background()
 
+	log.Printf("[INVITE] Starting invite: email=%s workspace=%s inviter=%s", body.Email, body.WorkspaceTopic, inviterID)
+
 	// EnsureUser for invitee (creates Tinode account if needed)
 	inviteeClient, err := tinode.NewClient(tinodeAddr, apiKey, nil)
 	if err != nil {
+		log.Printf("[INVITE] Failed to connect to tinode for invitee: %v", err)
 		return apis.NewApiError(500, "Failed to connect to chat server", nil)
 	}
 	defer inviteeClient.Close()
 
 	inviteeUID, err := inviteeClient.EnsureUser(ctx, inviteeLogin, inviteePassword, inviteeName)
 	if err != nil {
-		app.Logger().Error("Failed to ensure invitee Tinode user", "email", body.Email, "error", err)
+		log.Printf("[INVITE] Failed to ensure invitee tinode user: login=%s error=%v", inviteeLogin, err)
 		return apis.NewApiError(500, "Failed to ensure invitee chat account", nil)
 	}
+	log.Printf("[INVITE] Invitee tinode UID: %s", inviteeUID)
 
 	// Create a separate client and log in as the inviter
 	inviterClient, err := tinode.NewClient(tinodeAddr, apiKey, nil)
 	if err != nil {
+		log.Printf("[INVITE] Failed to connect to tinode for inviter: %v", err)
 		return apis.NewApiError(500, "Failed to connect to chat server", nil)
 	}
 	defer inviterClient.Close()
 
 	if err := inviterClient.Hello(ctx); err != nil {
+		log.Printf("[INVITE] Inviter hello failed: %v", err)
 		return apis.NewApiError(500, "Chat handshake failed", nil)
 	}
 	if _, err := inviterClient.Login(ctx, inviterLogin, inviterPassword); err != nil {
-		app.Logger().Error("Inviter login failed", "inviter_id", inviterID, "error", err)
+		log.Printf("[INVITE] Inviter login failed: login=%s error=%v", inviterLogin, err)
 		return apis.NewApiError(500, "Inviter chat login failed", nil)
 	}
+	log.Printf("[INVITE] Inviter logged in, inviting %s to %s", inviteeUID, body.WorkspaceTopic)
 
 	// Invite to workspace topic
 	if err := inviterClient.InviteUserToTopic(ctx, body.WorkspaceTopic, inviteeUID, "JRWPS"); err != nil {
-		app.Logger().Error("Failed to invite to workspace", "topic", body.WorkspaceTopic, "invitee", inviteeUID, "error", err)
+		log.Printf("[INVITE] Failed to invite to workspace: topic=%s invitee=%s error=%v", body.WorkspaceTopic, inviteeUID, err)
 		return apis.NewApiError(500, "Failed to invite user to workspace", nil)
 	}
+	log.Printf("[INVITE] Successfully invited %s to workspace %s", inviteeUID, body.WorkspaceTopic)
 
 	// Find all channels in the workspace and invite to each
 	channels, err := inviterClient.GetWorkspaceChannels(ctx, body.WorkspaceTopic)
 	if err != nil {
-		app.Logger().Warn("Could not fetch workspace channels", "workspace", body.WorkspaceTopic, "error", err)
+		log.Printf("[INVITE] Could not fetch workspace channels: %v", err)
 		// Non-fatal — workspace invite succeeded
 	} else {
+		log.Printf("[INVITE] Inviting to %d channels", len(channels))
 		for _, ch := range channels {
 			if err := inviterClient.InviteUserToTopic(ctx, ch, inviteeUID, "JRWPS"); err != nil {
-				app.Logger().Warn("Failed to invite to channel", "channel", ch, "invitee", inviteeUID, "error", err)
+				log.Printf("[INVITE] Failed to invite to channel %s: %v", ch, err)
 			}
 		}
 	}
