@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import { useWorkspace } from '../../context/WorkspaceContext'
 import { useChat } from '../../context/ChatContext'
 import { pb } from '../../lib/pocketbase'
@@ -41,8 +41,44 @@ const statusClass: Record<string, string> = {
 
 export default function Participants() {
   const { dispatch } = useWorkspace()
-  const { getMembers, myUserId } = useChat()
+  const { state, getMembers, myUserId } = useChat()
   const [deployedClaws, setDeployedClaws] = useState<ClawDeployment[]>([])
+  const [showInvite, setShowInvite] = useState(false)
+  const [inviteEmail, setInviteEmail] = useState('')
+  const [inviteStatus, setInviteStatus] = useState<{ type: 'success' | 'error' | 'no_account'; message: string } | null>(null)
+  const [inviting, setInviting] = useState(false)
+  const emailRef = useRef<HTMLInputElement>(null)
+
+  async function handleInvite(e: React.FormEvent) {
+    e.preventDefault()
+    if (!inviteEmail.trim() || !state.activeWorkspace) return
+
+    setInviting(true)
+    setInviteStatus(null)
+    try {
+      const resp = await fetch(pb.baseURL + '/api/workspace/invite', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${pb.authStore.token}`,
+        },
+        body: JSON.stringify({ email: inviteEmail.trim(), workspace_topic: state.activeWorkspace }),
+      })
+      const data = await resp.json()
+      if (resp.ok) {
+        setInviteStatus({ type: 'success', message: `Invited ${data.user_name || inviteEmail}` })
+        setInviteEmail('')
+      } else if (data.error === 'no_account') {
+        setInviteStatus({ type: 'no_account', message: data.signup_url })
+      } else {
+        setInviteStatus({ type: 'error', message: data.message || 'Invite failed' })
+      }
+    } catch {
+      setInviteStatus({ type: 'error', message: 'Network error' })
+    } finally {
+      setInviting(false)
+    }
+  }
 
   // Fetch user's claw deployments (poll every 15s to catch status changes)
   useEffect(() => {
@@ -74,6 +110,61 @@ export default function Participants() {
     <div>
       <div className="participants-section">
         <div className="participants-section-label">Humans &mdash; {humans.length}</div>
+
+        {/* Invite People */}
+        <div className="invite-section">
+          {!showInvite ? (
+            <button
+              className="invite-people-btn"
+              onClick={() => { setShowInvite(true); setInviteStatus(null); setTimeout(() => emailRef.current?.focus(), 0) }}
+            >
+              + Invite People
+            </button>
+          ) : (
+            <form className="invite-form" onSubmit={handleInvite}>
+              <input
+                ref={emailRef}
+                className="invite-input"
+                type="email"
+                placeholder="Email address"
+                value={inviteEmail}
+                onChange={e => setInviteEmail(e.target.value)}
+                disabled={inviting}
+              />
+              <div className="invite-actions">
+                <button className="invite-btn" type="submit" disabled={inviting || !inviteEmail.trim()}>
+                  {inviting ? 'Inviting...' : 'Send Invite'}
+                </button>
+                <button
+                  className="invite-cancel"
+                  type="button"
+                  onClick={() => { setShowInvite(false); setInviteEmail(''); setInviteStatus(null) }}
+                >
+                  Cancel
+                </button>
+              </div>
+              {inviteStatus?.type === 'success' && (
+                <div className="invite-status invite-success">{inviteStatus.message}</div>
+              )}
+              {inviteStatus?.type === 'error' && (
+                <div className="invite-status invite-error">{inviteStatus.message}</div>
+              )}
+              {inviteStatus?.type === 'no_account' && (
+                <div className="invite-status invite-no-account">
+                  No account found. Share this signup link:
+                  <span
+                    className="invite-link"
+                    onClick={() => navigator.clipboard.writeText(inviteStatus.message)}
+                    title="Click to copy"
+                  >
+                    {inviteStatus.message}
+                  </span>
+                </div>
+              )}
+            </form>
+          )}
+        </div>
+
         {humans.map(m => (
           <div key={m.id} className="participant-item">
             <div

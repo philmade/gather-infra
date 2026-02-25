@@ -921,6 +921,134 @@ html, body {
     background: var(--accent-soft);
 }
 
+/* ===== Invite People ===== */
+
+.invite-section {
+    padding: 0 12px 8px;
+}
+
+.invite-people-btn {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm);
+    background: transparent;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 0.85rem;
+    transition: all 0.15s;
+}
+
+.invite-people-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+
+.invite-form {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.invite-input {
+    width: 100%;
+    padding: 0.375rem 0.625rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    font-family: inherit;
+    outline: none;
+    box-sizing: border-box;
+}
+
+.invite-input:focus {
+    border-color: var(--accent);
+}
+
+.invite-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.invite-btn {
+    flex: 1;
+    padding: 0.375rem 0.625rem;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+
+.invite-btn:hover:not(:disabled) {
+    opacity: 0.85;
+}
+
+.invite-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.invite-cancel {
+    padding: 0.375rem 0.625rem;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.invite-cancel:hover {
+    border-color: var(--text-muted);
+    color: var(--text-primary);
+}
+
+.invite-status {
+    font-size: 0.78rem;
+    padding: 4px 0;
+    line-height: 1.4;
+}
+
+.invite-success {
+    color: var(--green);
+}
+
+.invite-error {
+    color: var(--red, #e53935);
+}
+
+.invite-no-account {
+    color: var(--text-muted);
+}
+
+.invite-link {
+    display: block;
+    margin-top: 2px;
+    color: var(--accent);
+    cursor: pointer;
+    word-break: break-all;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+}
+
+.invite-link:hover {
+    text-decoration-style: solid;
+}
+
 /* ===== Agent Detail Panel ===== */
 
 .agent-detail {

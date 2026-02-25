@@ -587,6 +587,40 @@ func (c *Client) updateBotMetadataWithHandle(ctx context.Context, displayName, h
 	return nil
 }
 
+// InviteUserToTopic invites a different user (by Tinode UID) to a group topic.
+// The current session user must have admin (A) access on the topic.
+// mode is the access mode string, e.g. "JRWPS".
+func (c *Client) InviteUserToTopic(ctx context.Context, topic, targetUID, mode string) error {
+	msg := &pb.ClientMsg{
+		Message: &pb.ClientMsg_Sub{
+			Sub: &pb.ClientSub{
+				Id:    c.nextMsgID(),
+				Topic: topic,
+				SetQuery: &pb.SetQuery{
+					Sub: &pb.SetSub{
+						UserId: targetUID,
+						Mode:   mode,
+					},
+				},
+			},
+		},
+	}
+
+	resp, err := c.sendAndReceive(ctx, msg)
+	if err != nil {
+		return err
+	}
+
+	if ctrl := resp.GetCtrl(); ctrl != nil {
+		if ctrl.Code >= 200 && ctrl.Code < 300 {
+			return nil
+		}
+		return fmt.Errorf("invite to topic failed: %d %s", ctrl.Code, ctrl.Text)
+	}
+
+	return fmt.Errorf("unexpected response to invite")
+}
+
 // Subscribe subscribes a user to a topic
 func (c *Client) Subscribe(ctx context.Context, topic string) error {
 	msg := &pb.ClientMsg{
