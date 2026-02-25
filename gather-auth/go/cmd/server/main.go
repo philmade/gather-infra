@@ -1138,7 +1138,15 @@ func handleWorkspaceInvite(app *pocketbase.PocketBase, re *core.RequestEvent, ti
 		log.Printf("[INVITE] Inviter login failed: login=%s error=%v", inviterLogin, err)
 		return apis.NewApiError(500, "Inviter chat login failed", nil)
 	}
-	log.Printf("[INVITE] Inviter logged in, inviting %s to %s", inviteeUID, body.WorkspaceTopic)
+	log.Printf("[INVITE] Inviter logged in, joining workspace topic first")
+
+	// Inviter must join the topic session before inviting others
+	if err := inviterClient.Subscribe(ctx, body.WorkspaceTopic); err != nil {
+		log.Printf("[INVITE] Inviter failed to join workspace topic: %v", err)
+		return apis.NewApiError(500, "Failed to join workspace", nil)
+	}
+
+	log.Printf("[INVITE] Inviter joined workspace, now inviting %s to %s", inviteeUID, body.WorkspaceTopic)
 
 	// Invite to workspace topic
 	if err := inviterClient.InviteUserToTopic(ctx, body.WorkspaceTopic, inviteeUID, "JRWPS"); err != nil {
@@ -1155,6 +1163,11 @@ func handleWorkspaceInvite(app *pocketbase.PocketBase, re *core.RequestEvent, ti
 	} else {
 		log.Printf("[INVITE] Inviting to %d channels", len(channels))
 		for _, ch := range channels {
+			// Join the channel first, then invite
+			if err := inviterClient.Subscribe(ctx, ch); err != nil {
+				log.Printf("[INVITE] Failed to join channel %s: %v", ch, err)
+				continue
+			}
 			if err := inviterClient.InviteUserToTopic(ctx, ch, inviteeUID, "JRWPS"); err != nil {
 				log.Printf("[INVITE] Failed to invite to channel %s: %v", ch, err)
 			}
