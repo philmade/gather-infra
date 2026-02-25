@@ -207,7 +207,15 @@ func main() {
 		})
 
 		e.Router.POST("/api/workspace/invite", func(re *core.RequestEvent) error {
-			return handleWorkspaceInvite(app, re, tinodeAddr, apiKey)
+			return handleWorkspaceInvite(app, re)
+		}).Bind(apis.RequireAuth())
+
+		e.Router.GET("/api/invites/{token}", func(re *core.RequestEvent) error {
+			return handleGetInvite(app, re)
+		})
+
+		e.Router.POST("/api/invites/{token}/redeem", func(re *core.RequestEvent) error {
+			return handleRedeemInvite(app, re, tinodeAddr, apiKey)
 		}).Bind(apis.RequireAuth())
 
 		return e.Next()
@@ -323,6 +331,9 @@ func ensureCollections(app *pocketbase.PocketBase) error {
 		return err
 	}
 	if err := ensureClawUsageCollection(app); err != nil {
+		return err
+	}
+	if err := ensureInvitesCollection(app); err != nil {
 		return err
 	}
 	if err := ensureUserFields(app); err != nil {
@@ -1041,7 +1052,7 @@ func handleTinodeCredentials(re *core.RequestEvent, tinodeAPIKey string) error {
 // Workspace invite by email
 // =============================================================================
 
-func handleWorkspaceInvite(app *pocketbase.PocketBase, re *core.RequestEvent, tinodeAddr, apiKey string) error {
+func handleWorkspaceInvite(app *pocketbase.PocketBase, re *core.RequestEvent) error {
 	info, _ := re.RequestInfo()
 	if info.Auth == nil {
 		return apis.NewUnauthorizedError("Authentication required", nil)
@@ -1051,6 +1062,7 @@ func handleWorkspaceInvite(app *pocketbase.PocketBase, re *core.RequestEvent, ti
 	var body struct {
 		Email          string `json:"email"`
 		WorkspaceTopic string `json:"workspace_topic"`
+		WorkspaceName  string `json:"workspace_name"`
 	}
 	if err := json.NewDecoder(re.Request.Body).Decode(&body); err != nil {
 		return apis.NewBadRequestError("Invalid request body", nil)
@@ -1059,178 +1071,222 @@ func handleWorkspaceInvite(app *pocketbase.PocketBase, re *core.RequestEvent, ti
 		return apis.NewBadRequestError("email and workspace_topic are required", nil)
 	}
 
-	// Look up invitee by email in users collection
-	usersCol, err := app.FindCollectionByNameOrId("users")
-	if err != nil {
-		return apis.NewApiError(500, "users collection not found", nil)
-	}
-	// Get inviter's name for email templates
 	inviterName := info.Auth.GetString("name")
 	if inviterName == "" {
 		inviterName = info.Auth.GetString("email")
 	}
 
-	invitee, err := app.FindAuthRecordByEmail(usersCol, body.Email)
-	if err != nil || invitee == nil {
-		// Send signup invitation email (fire-and-forget)
-		go func() {
-			if err := gatheremail.Send(body.Email,
-				inviterName+" invited you to Gather",
-				inviteSignupHTML(inviterName),
-			); err != nil {
-				app.Logger().Warn("Failed to send signup invite email", "to", body.Email, "error", err)
-			}
-		}()
-
-		return re.JSON(404, map[string]interface{}{
-			"error":      "no_account",
-			"message":    "No account found for this email. We sent them a signup invitation.",
-			"signup_url": "https://gather.is/app",
-		})
+	// Generate a random 32-byte hex token
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return apis.NewApiError(500, "Failed to generate invite token", nil)
 	}
+	token := hex.EncodeToString(tokenBytes)
 
-	inviteeName := invitee.GetString("name")
-	if inviteeName == "" {
-		inviteeName = invitee.GetString("email")
-	}
-
-	// Derive Tinode credentials for invitee
-	inviteeLogin := fmt.Sprintf("pb_%s", invitee.Id)
-	inviteePassword := generateTinodePassword(invitee.Id)
-
-	// Derive Tinode credentials for inviter (current user)
-	inviterID := info.Auth.Id
-	inviterLogin := fmt.Sprintf("pb_%s", inviterID)
-	inviterPassword := generateTinodePassword(inviterID)
-
-	ctx := context.Background()
-
-	log.Printf("[INVITE] Starting invite: email=%s workspace=%s inviter=%s", body.Email, body.WorkspaceTopic, inviterID)
-
-	// EnsureUser for invitee (creates Tinode account if needed)
-	inviteeClient, err := tinode.NewClient(tinodeAddr, apiKey, nil)
+	// Create invite record
+	invitesCol, err := app.FindCollectionByNameOrId("invites")
 	if err != nil {
-		log.Printf("[INVITE] Failed to connect to tinode for invitee: %v", err)
-		return apis.NewApiError(500, "Failed to connect to chat server", nil)
+		return apis.NewApiError(500, "invites collection not found", nil)
 	}
-	defer inviteeClient.Close()
-
-	inviteeUID, err := inviteeClient.EnsureUser(ctx, inviteeLogin, inviteePassword, inviteeName)
-	if err != nil {
-		log.Printf("[INVITE] Failed to ensure invitee tinode user: login=%s error=%v", inviteeLogin, err)
-		return apis.NewApiError(500, "Failed to ensure invitee chat account", nil)
-	}
-	log.Printf("[INVITE] Invitee tinode UID: %s", inviteeUID)
-
-	// Create a separate client and log in as the inviter
-	inviterClient, err := tinode.NewClient(tinodeAddr, apiKey, nil)
-	if err != nil {
-		log.Printf("[INVITE] Failed to connect to tinode for inviter: %v", err)
-		return apis.NewApiError(500, "Failed to connect to chat server", nil)
-	}
-	defer inviterClient.Close()
-
-	if err := inviterClient.Hello(ctx); err != nil {
-		log.Printf("[INVITE] Inviter hello failed: %v", err)
-		return apis.NewApiError(500, "Chat handshake failed", nil)
-	}
-	if _, err := inviterClient.Login(ctx, inviterLogin, inviterPassword); err != nil {
-		log.Printf("[INVITE] Inviter login failed: login=%s error=%v", inviterLogin, err)
-		return apis.NewApiError(500, "Inviter chat login failed", nil)
-	}
-	log.Printf("[INVITE] Inviter logged in, joining workspace topic first")
-
-	// Inviter must join the topic session before inviting others
-	if err := inviterClient.Subscribe(ctx, body.WorkspaceTopic); err != nil {
-		log.Printf("[INVITE] Inviter failed to join workspace topic: %v", err)
-		return apis.NewApiError(500, "Failed to join workspace", nil)
+	record := core.NewRecord(invitesCol)
+	record.Set("token", token)
+	record.Set("email", body.Email)
+	record.Set("inviter_id", info.Auth.Id)
+	record.Set("inviter_name", inviterName)
+	record.Set("workspace_topic", body.WorkspaceTopic)
+	record.Set("workspace_name", body.WorkspaceName)
+	record.Set("status", "pending")
+	if err := app.Save(record); err != nil {
+		log.Printf("[INVITE] Failed to save invite record: %v", err)
+		return apis.NewApiError(500, "Failed to create invite", nil)
 	}
 
-	log.Printf("[INVITE] Inviter joined workspace, now inviting %s to %s", inviteeUID, body.WorkspaceTopic)
+	inviteURL := fmt.Sprintf("https://gather.is/app?invite=%s", token)
+	log.Printf("[INVITE] Created invite: email=%s workspace=%s token=%s", body.Email, body.WorkspaceTopic, token[:8]+"...")
 
-	// Invite to workspace topic
-	if err := inviterClient.InviteUserToTopic(ctx, body.WorkspaceTopic, inviteeUID, "JRWPS"); err != nil {
-		log.Printf("[INVITE] Failed to invite to workspace: topic=%s invitee=%s error=%v", body.WorkspaceTopic, inviteeUID, err)
-		return apis.NewApiError(500, "Failed to invite user to workspace", nil)
-	}
-	log.Printf("[INVITE] Successfully invited %s to workspace %s", inviteeUID, body.WorkspaceTopic)
-
-	// Find all channels in the workspace and invite to each
-	channels, err := inviterClient.GetWorkspaceChannels(ctx, body.WorkspaceTopic)
-	if err != nil {
-		log.Printf("[INVITE] Could not fetch workspace channels: %v", err)
-		// Non-fatal — workspace invite succeeded
-	} else {
-		log.Printf("[INVITE] Inviting to %d channels", len(channels))
-		for _, ch := range channels {
-			// Join the channel first, then invite
-			if err := inviterClient.Subscribe(ctx, ch); err != nil {
-				log.Printf("[INVITE] Failed to join channel %s: %v", ch, err)
-				continue
-			}
-			if err := inviterClient.InviteUserToTopic(ctx, ch, inviteeUID, "JRWPS"); err != nil {
-				log.Printf("[INVITE] Failed to invite to channel %s: %v", ch, err)
-			}
-		}
-	}
-
-	// Send notification email to invitee (fire-and-forget)
+	// Send email (fire-and-forget)
 	go func() {
 		if err := gatheremail.Send(body.Email,
 			inviterName+" invited you to a workspace on Gather",
-			inviteExistingHTML(inviterName, inviteeName),
+			inviteEmailHTML(inviterName, inviteURL),
 		); err != nil {
 			app.Logger().Warn("Failed to send invite email", "to", body.Email, "error", err)
 		}
 	}()
 
 	return re.JSON(200, map[string]interface{}{
-		"status":    "ok",
-		"message":   fmt.Sprintf("%s has been invited", body.Email),
-		"user_name": inviteeName,
+		"status":  "ok",
+		"message": fmt.Sprintf("Invite sent to %s", body.Email),
 	})
 }
 
-// inviteExistingHTML returns the email body for inviting an existing user.
-func inviteExistingHTML(inviterName, inviteeName string) string {
-	return fmt.Sprintf(`<!DOCTYPE html>
-<html><body style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#333">
-  <div style="background:#f8f9fa;border-radius:10px;padding:32px">
-    <h2 style="margin:0 0 16px">You've been invited!</h2>
-    <p style="font-size:16px;line-height:1.5">
-      <strong>%s</strong> invited you to their workspace on Gather.
-    </p>
-    <div style="text-align:center;margin:28px 0">
-      <a href="https://gather.is/app" style="background:#6366f1;color:#fff;padding:14px 28px;text-decoration:none;border-radius:8px;font-weight:600;display:inline-block">
-        Open Gather
-      </a>
-    </div>
-    <p style="font-size:13px;color:#888">
-      Hi %s — log in to see your new workspace and channels.
-    </p>
-  </div>
-</body></html>`, inviterName, inviteeName)
+func handleGetInvite(app *pocketbase.PocketBase, re *core.RequestEvent) error {
+	token := re.Request.PathValue("token")
+	if token == "" {
+		return apis.NewBadRequestError("token is required", nil)
+	}
+
+	records, err := app.FindRecordsByFilter("invites", "token = {:token}", "", 1, 0,
+		map[string]any{"token": token})
+	if err != nil || len(records) == 0 {
+		return apis.NewNotFoundError("Invite not found", nil)
+	}
+	invite := records[0]
+
+	status := invite.GetString("status")
+	if status == "redeemed" || status == "expired" {
+		return re.JSON(410, map[string]interface{}{
+			"error":  "invite_" + status,
+			"status": status,
+		})
+	}
+
+	return re.JSON(200, map[string]interface{}{
+		"inviter_name":   invite.GetString("inviter_name"),
+		"workspace_name": invite.GetString("workspace_name"),
+		"email":          invite.GetString("email"),
+		"status":         status,
+	})
 }
 
-// inviteSignupHTML returns the email body for inviting someone without an account.
-func inviteSignupHTML(inviterName string) string {
+func handleRedeemInvite(app *pocketbase.PocketBase, re *core.RequestEvent, tinodeAddr, apiKey string) error {
+	info, _ := re.RequestInfo()
+	if info.Auth == nil {
+		return apis.NewUnauthorizedError("Authentication required", nil)
+	}
+
+	token := re.Request.PathValue("token")
+	if token == "" {
+		return apis.NewBadRequestError("token is required", nil)
+	}
+
+	records, err := app.FindRecordsByFilter("invites", "token = {:token}", "", 1, 0,
+		map[string]any{"token": token})
+	if err != nil || len(records) == 0 {
+		return apis.NewNotFoundError("Invite not found", nil)
+	}
+	invite := records[0]
+
+	status := invite.GetString("status")
+	if status != "pending" {
+		return re.JSON(410, map[string]interface{}{
+			"error":  "invite_" + status,
+			"status": status,
+		})
+	}
+
+	workspaceTopic := invite.GetString("workspace_topic")
+	inviterID := invite.GetString("inviter_id")
+
+	// Derive Tinode credentials for invitee (current user)
+	inviteeID := info.Auth.Id
+	inviteeName := info.Auth.GetString("name")
+	if inviteeName == "" {
+		inviteeName = info.Auth.GetString("email")
+	}
+	inviteeLogin := fmt.Sprintf("pb_%s", inviteeID)
+	inviteePassword := generateTinodePassword(inviteeID)
+
+	// Derive Tinode credentials for inviter
+	inviterLogin := fmt.Sprintf("pb_%s", inviterID)
+	inviterPassword := generateTinodePassword(inviterID)
+
+	ctx := context.Background()
+
+	log.Printf("[REDEEM] Starting redeem: token=%s workspace=%s invitee=%s", token[:8]+"...", workspaceTopic, inviteeID)
+
+	// EnsureUser for invitee (creates Tinode account if needed)
+	inviteeClient, err := tinode.NewClient(tinodeAddr, apiKey, nil)
+	if err != nil {
+		log.Printf("[REDEEM] Failed to connect to tinode for invitee: %v", err)
+		return apis.NewApiError(500, "Failed to connect to chat server", nil)
+	}
+	defer inviteeClient.Close()
+
+	inviteeUID, err := inviteeClient.EnsureUser(ctx, inviteeLogin, inviteePassword, inviteeName)
+	if err != nil {
+		log.Printf("[REDEEM] Failed to ensure invitee tinode user: login=%s error=%v", inviteeLogin, err)
+		return apis.NewApiError(500, "Failed to ensure invitee chat account", nil)
+	}
+	log.Printf("[REDEEM] Invitee tinode UID: %s", inviteeUID)
+
+	// Log in as inviter
+	inviterClient, err := tinode.NewClient(tinodeAddr, apiKey, nil)
+	if err != nil {
+		log.Printf("[REDEEM] Failed to connect to tinode for inviter: %v", err)
+		return apis.NewApiError(500, "Failed to connect to chat server", nil)
+	}
+	defer inviterClient.Close()
+
+	if err := inviterClient.Hello(ctx); err != nil {
+		log.Printf("[REDEEM] Inviter hello failed: %v", err)
+		return apis.NewApiError(500, "Chat handshake failed", nil)
+	}
+	if _, err := inviterClient.Login(ctx, inviterLogin, inviterPassword); err != nil {
+		log.Printf("[REDEEM] Inviter login failed: login=%s error=%v", inviterLogin, err)
+		return apis.NewApiError(500, "Inviter chat login failed", nil)
+	}
+
+	// Inviter joins workspace, then invites invitee
+	if err := inviterClient.Subscribe(ctx, workspaceTopic); err != nil {
+		log.Printf("[REDEEM] Inviter failed to join workspace topic: %v", err)
+		return apis.NewApiError(500, "Failed to join workspace", nil)
+	}
+
+	if err := inviterClient.InviteUserToTopic(ctx, workspaceTopic, inviteeUID, "JRWPS"); err != nil {
+		log.Printf("[REDEEM] Failed to invite to workspace: topic=%s invitee=%s error=%v", workspaceTopic, inviteeUID, err)
+		return apis.NewApiError(500, "Failed to invite user to workspace", nil)
+	}
+	log.Printf("[REDEEM] Invited %s to workspace %s", inviteeUID, workspaceTopic)
+
+	// Invite to all channels in the workspace
+	channels, err := inviterClient.GetWorkspaceChannels(ctx, workspaceTopic)
+	if err != nil {
+		log.Printf("[REDEEM] Could not fetch workspace channels: %v", err)
+	} else {
+		for _, ch := range channels {
+			if err := inviterClient.Subscribe(ctx, ch); err != nil {
+				log.Printf("[REDEEM] Failed to join channel %s: %v", ch, err)
+				continue
+			}
+			if err := inviterClient.InviteUserToTopic(ctx, ch, inviteeUID, "JRWPS"); err != nil {
+				log.Printf("[REDEEM] Failed to invite to channel %s: %v", ch, err)
+			}
+		}
+	}
+
+	// Mark invite as redeemed
+	invite.Set("status", "redeemed")
+	if err := app.Save(invite); err != nil {
+		log.Printf("[REDEEM] Failed to update invite status: %v", err)
+	}
+
+	return re.JSON(200, map[string]interface{}{
+		"status":          "ok",
+		"workspace_topic": workspaceTopic,
+	})
+}
+
+// inviteEmailHTML returns the email body for workspace invitations.
+// Works for both existing and new users — the invite URL handles everything.
+func inviteEmailHTML(inviterName, inviteURL string) string {
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html><body style="font-family:-apple-system,BlinkMacSystemFont,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#333">
   <div style="background:#f8f9fa;border-radius:10px;padding:32px">
     <h2 style="margin:0 0 16px">You've been invited to Gather</h2>
     <p style="font-size:16px;line-height:1.5">
-      <strong>%s</strong> wants to collaborate with you on Gather — a workspace for humans and AI agents.
+      <strong>%s</strong> invited you to their workspace on Gather — a workspace for humans and AI agents.
     </p>
     <div style="text-align:center;margin:28px 0">
-      <a href="https://gather.is/app" style="background:#6366f1;color:#fff;padding:14px 28px;text-decoration:none;border-radius:8px;font-weight:600;display:inline-block">
-        Create Your Account
+      <a href="%s" style="background:#6366f1;color:#fff;padding:14px 28px;text-decoration:none;border-radius:8px;font-weight:600;display:inline-block">
+        Accept Invite
       </a>
     </div>
     <p style="font-size:13px;color:#888">
-      Once you sign up, you'll automatically join the workspace.
+      This invite expires in 7 days.
     </p>
   </div>
-</body></html>`, inviterName)
+</body></html>`, inviterName, inviteURL)
 }
 
 // =============================================================================
@@ -1932,6 +1988,32 @@ func ensureClawUsageCollection(app *pocketbase.PocketBase) error {
 		return fmt.Errorf("create claw_usage collection: %w", err)
 	}
 	app.Logger().Info("Created claw_usage collection")
+	return nil
+}
+
+func ensureInvitesCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("invites")
+	if err == nil {
+		return nil // already exists
+	}
+
+	c := core.NewBaseCollection("invites")
+	c.Fields.Add(
+		&core.TextField{Name: "token", Required: true, Max: 64},
+		&core.TextField{Name: "email", Required: true, Max: 255},
+		&core.TextField{Name: "inviter_id", Required: true, Max: 50},
+		&core.TextField{Name: "inviter_name", Max: 100},
+		&core.TextField{Name: "workspace_topic", Required: true, Max: 100},
+		&core.TextField{Name: "workspace_name", Max: 200},
+		&core.TextField{Name: "status", Max: 20},
+		&core.AutodateField{Name: "created", OnCreate: true},
+	)
+	c.AddIndex("idx_invites_token", true, "token", "")
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create invites collection: %w", err)
+	}
+	app.Logger().Info("Created invites collection")
 	return nil
 }
 

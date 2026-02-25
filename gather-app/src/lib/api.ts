@@ -238,4 +238,20 @@ export function createClawCheckout(id: string): Promise<{ url: string }> {
   return apiFetch(`/api/claws/${encodeURIComponent(id)}/checkout`, { method: 'POST' })
 }
 
+// Invites
+export interface InviteInfo {
+  inviter_name: string
+  workspace_name: string
+  email: string
+  status: string
+}
+
+export function getInviteInfo(token: string) {
+  return apiFetch<InviteInfo>(`/api/invites/${encodeURIComponent(token)}`)
+}
+
+export function redeemInvite(token: string) {
+  return apiPost<{ status: string; workspace_topic: string }>(`/api/invites/${encodeURIComponent(token)}/redeem`, {})
+}
+
 export { apiFetch, apiPost }

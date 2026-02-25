@@ -1,7 +1,12 @@
 import { useState } from 'react'
-import { useAuth } from '../../context/AuthContext'
+import { useAuth, type PendingInvite } from '../../context/AuthContext'
 
-export default function LoginScreen({ onBack }: { onBack?: () => void } = {}) {
+interface Props {
+  onBack?: () => void
+  inviteBanner?: PendingInvite
+}
+
+export default function LoginScreen({ onBack, inviteBanner }: Props = {}) {
   const { state, signInWithEmail, signUpWithEmail, signInWithGoogle, clearError } = useAuth()
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
@@ -25,6 +30,24 @@ export default function LoginScreen({ onBack }: { onBack?: () => void } = {}) {
   return (
     <div className="login-screen">
       <div className="login-card">
+        {inviteBanner && (
+          <div style={{
+            background: 'var(--bg-tertiary, #2a2a3a)',
+            border: '1px solid var(--border, #3a3a4a)',
+            borderRadius: 8,
+            padding: '12px 16px',
+            marginBottom: 16,
+            fontSize: '0.85rem',
+            lineHeight: 1.5,
+            color: 'var(--text-primary, #e0e0e0)',
+            textAlign: 'center',
+          }}>
+            <strong>{inviteBanner.inviterName}</strong> invited you to join
+            {inviteBanner.workspaceName ? ` "${inviteBanner.workspaceName}"` : ' their workspace'} on Gather.
+            Sign in or create an account to continue.
+          </div>
+        )}
+
         <div className="login-logo">
           <img src="/assets/logo.svg" alt="Gather" width="36" height="36" />
           <span className="login-brand">gather</span>

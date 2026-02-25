@@ -45,7 +45,7 @@ export default function Participants() {
   const [deployedClaws, setDeployedClaws] = useState<ClawDeployment[]>([])
   const [showInvite, setShowInvite] = useState(false)
   const [inviteEmail, setInviteEmail] = useState('')
-  const [inviteStatus, setInviteStatus] = useState<{ type: 'success' | 'error' | 'no_account'; message: string } | null>(null)
+  const [inviteStatus, setInviteStatus] = useState<{ type: 'success' | 'error'; message: string } | null>(null)
   const [inviting, setInviting] = useState(false)
   const emailRef = useRef<HTMLInputElement>(null)
 
@@ -56,20 +56,23 @@ export default function Participants() {
     setInviting(true)
     setInviteStatus(null)
     try {
+      const activeWs = state.workspaces.find(w => w.topic === state.activeWorkspace)
       const resp = await fetch(pb.baseURL + '/api/workspace/invite', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${pb.authStore.token}`,
         },
-        body: JSON.stringify({ email: inviteEmail.trim(), workspace_topic: state.activeWorkspace }),
+        body: JSON.stringify({
+          email: inviteEmail.trim(),
+          workspace_topic: state.activeWorkspace,
+          workspace_name: activeWs?.name || '',
+        }),
       })
       const data = await resp.json()
       if (resp.ok) {
-        setInviteStatus({ type: 'success', message: `Invited ${data.user_name || inviteEmail}` })
+        setInviteStatus({ type: 'success', message: data.message || `Invite sent to ${inviteEmail}` })
         setInviteEmail('')
-      } else if (data.error === 'no_account') {
-        setInviteStatus({ type: 'no_account', message: data.signup_url })
       } else {
         setInviteStatus({ type: 'error', message: data.message || 'Invite failed' })
       }
@@ -148,18 +151,6 @@ export default function Participants() {
               )}
               {inviteStatus?.type === 'error' && (
                 <div className="invite-status invite-error">{inviteStatus.message}</div>
-              )}
-              {inviteStatus?.type === 'no_account' && (
-                <div className="invite-status invite-no-account">
-                  No account found. Share this signup link:
-                  <span
-                    className="invite-link"
-                    onClick={() => navigator.clipboard.writeText(inviteStatus.message)}
-                    title="Click to copy"
-                  >
-                    {inviteStatus.message}
-                  </span>
-                </div>
               )}
             </form>
           )}

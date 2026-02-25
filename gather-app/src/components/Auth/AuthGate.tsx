@@ -25,6 +25,11 @@ export default function AuthGate({ children }: { children: ReactNode }) {
   }
 
   if (!state.isAuthenticated) {
+    // Pending invite — skip landing, go straight to login with banner
+    if (state.pendingInvite) {
+      return <LoginScreen inviteBanner={state.pendingInvite} />
+    }
+
     if (showLogin) {
       return <LoginScreen onBack={() => setShowLogin(false)} />
     }
