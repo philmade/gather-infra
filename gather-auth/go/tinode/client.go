@@ -612,7 +612,8 @@ func (c *Client) InviteUserToTopic(ctx context.Context, topic, targetUID, mode s
 	}
 
 	if ctrl := resp.GetCtrl(); ctrl != nil {
-		if ctrl.Code >= 200 && ctrl.Code < 300 {
+		if ctrl.Code >= 200 && ctrl.Code < 400 {
+			// 2xx = success, 304 = already subscribed — both are fine
 			return nil
 		}
 		return fmt.Errorf("invite to topic failed: %d %s", ctrl.Code, ctrl.Text)
@@ -638,7 +639,8 @@ func (c *Client) Subscribe(ctx context.Context, topic string) error {
 	}
 
 	if ctrl := resp.GetCtrl(); ctrl != nil {
-		if ctrl.Code >= 200 && ctrl.Code < 300 {
+		if ctrl.Code >= 200 && ctrl.Code < 400 {
+			// 2xx = success, 304 = already subscribed — both are fine
 			return nil
 		}
 		return fmt.Errorf("subscribe failed: %d %s", ctrl.Code, ctrl.Text)
