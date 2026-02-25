@@ -2,7 +2,10 @@ name = "gather-email"
 main = "src/index.js"
 compatibility_date = "2024-09-25"
 
-# AUTH_TOKEN set via `wrangler secret put AUTH_TOKEN`
+# Secrets (set via `wrangler secret put <NAME>`):
+#   AUTH_TOKEN           — outbound send auth
+#   EMAIL_INBOUND_SECRET — shared secret for inbound delivery to gather-auth
+#   GATHER_AUTH_URL      — e.g. https://gather.is
 
 # Email Routing send binding — requires Email Routing enabled on gather.is
 [[send_email]]

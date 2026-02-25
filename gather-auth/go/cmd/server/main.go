@@ -114,6 +114,7 @@ func main() {
 		gatherapi.RegisterWaitlistRoutes(api, app)
 		gatherapi.RegisterClawRoutes(api, app)
 		gatherapi.RegisterStripeRoutes(api, app)
+		gatherapi.RegisterEmailRoutes(api, app, jwtKey)
 
 		tinodeWsURL := os.Getenv("TINODE_WS_URL")
 		if tinodeWsURL == "" {
@@ -175,6 +176,8 @@ func main() {
 			"/api/claws/{path...}",
 			"/api/stripe/{path...}",
 			"/api/llm/{path...}",
+			"/api/email",
+			"/api/email/{path...}",
 			"/discover",
 		} {
 			e.Router.Any(p, delegate)
@@ -334,6 +337,9 @@ func ensureCollections(app *pocketbase.PocketBase) error {
 		return err
 	}
 	if err := ensureInvitesCollection(app); err != nil {
+		return err
+	}
+	if err := ensureEmailsCollection(app); err != nil {
 		return err
 	}
 	if err := ensureUserFields(app); err != nil {
@@ -711,6 +717,37 @@ func ensureMessagesCollection(app *pocketbase.PocketBase) error {
 		return fmt.Errorf("create messages collection: %w", err)
 	}
 	app.Logger().Info("Created messages collection")
+	return nil
+}
+
+func ensureEmailsCollection(app *pocketbase.PocketBase) error {
+	_, err := app.FindCollectionByNameOrId("emails")
+	if err == nil {
+		return nil
+	}
+
+	c := core.NewBaseCollection("emails")
+	c.Fields.Add(
+		&core.TextField{Name: "agent_id", Required: true, Max: 50},
+		&core.SelectField{Name: "direction", Required: true, Values: []string{"inbound", "outbound"}},
+		&core.TextField{Name: "from_addr", Required: true, Max: 254},
+		&core.TextField{Name: "to_addr", Required: true, Max: 254},
+		&core.TextField{Name: "subject", Max: 500},
+		&core.TextField{Name: "body_html", Max: 50000},
+		&core.TextField{Name: "body_text", Max: 50000},
+		&core.TextField{Name: "message_id", Max: 254},
+		&core.TextField{Name: "in_reply_to", Max: 254},
+		&core.BoolField{Name: "read"},
+		&core.AutodateField{Name: "created", OnCreate: true},
+	)
+
+	c.AddIndex("idx_emails_agent", false, "agent_id", "")
+	c.AddIndex("idx_emails_agent_unread", false, "agent_id, read", "")
+
+	if err := app.Save(c); err != nil {
+		return fmt.Errorf("create emails collection: %w", err)
+	}
+	app.Logger().Info("Created emails collection")
 	return nil
 }
 

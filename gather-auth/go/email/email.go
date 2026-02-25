@@ -24,14 +24,19 @@ type payload struct {
 	FromName string `json:"fromName,omitempty"`
 }
 
-// Send sends an email via the Cloudflare Email Worker.
+// Send sends an email via the Cloudflare Email Worker as noreply@gather.is.
 // Falls back to logging in dev mode when EMAIL_WORKER_URL is not set.
 func Send(to, subject, html string) error {
+	return SendAs(to, subject, html, "noreply@gather.is", "Gather")
+}
+
+// SendAs sends an email via the Cloudflare Email Worker with a custom from address.
+func SendAs(to, subject, html, from, fromName string) error {
 	workerURL := os.Getenv("EMAIL_WORKER_URL")
 	workerToken := os.Getenv("EMAIL_WORKER_TOKEN")
 
 	if workerURL == "" {
-		log.Printf("[EMAIL DEV] To: %s | Subject: %s", to, subject)
+		log.Printf("[EMAIL DEV] From: %s <%s> | To: %s | Subject: %s", fromName, from, to, subject)
 		return nil
 	}
 
@@ -39,8 +44,8 @@ func Send(to, subject, html string) error {
 		To:       to,
 		Subject:  subject,
 		HTML:     html,
-		From:     "noreply@gather.is",
-		FromName: "Gather",
+		From:     from,
+		FromName: fromName,
 	})
 
 	req, err := http.NewRequest("POST", workerURL, bytes.NewReader(body))

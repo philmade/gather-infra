@@ -114,6 +114,7 @@ services:
       STRIPE_PRICE_MAX_TEST: ${STRIPE_PRICE_MAX_TEST:-}
       EMAIL_WORKER_URL: ${EMAIL_WORKER_URL:-}
       EMAIL_WORKER_TOKEN: ${EMAIL_WORKER_TOKEN:-}
+      EMAIL_INBOUND_SECRET: ${EMAIL_INBOUND_SECRET:-}
     volumes:
       - pocketbase_data:/pb_data
       - /var/run/docker.sock:/var/run/docker.sock
