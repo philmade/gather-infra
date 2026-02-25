@@ -43,11 +43,13 @@ export default {
 
       const fromEmail = data.from || "noreply@gather.is";
       const fromName = data.fromName || "Gather";
+      const msgId = `<${Date.now()}.${Math.random().toString(36).slice(2)}@gather.is>`;
 
       const raw = [
         `From: ${fromName} <${fromEmail}>`,
         `To: ${data.to}`,
         `Subject: ${data.subject}`,
+        `Message-ID: ${msgId}`,
         `MIME-Version: 1.0`,
         `Content-Type: text/html; charset=UTF-8`,
         ``,
