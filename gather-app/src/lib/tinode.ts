@@ -141,7 +141,7 @@ export class TinodeClient {
 
     this.meTopic.contacts((sub: {
       topic?: string
-      public?: { fn?: string; bot?: boolean; type?: string }
+      public?: { fn?: string; bot?: boolean; type?: string; parent?: string }
       seq?: number
       read?: number
       online?: boolean
@@ -166,6 +166,7 @@ export class TinodeClient {
         online: sub.online,
         isBot: !!pub?.bot || (name ? /bot|agent/i.test(name) : false),
         touched: sub.touched || sub.updated,
+        parent: pub?.parent,
       }
 
       if (isP2P) dms.push(item)

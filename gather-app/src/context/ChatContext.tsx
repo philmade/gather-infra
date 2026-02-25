@@ -112,6 +112,7 @@ interface ChatContextValue {
   selectTopic: (topic: string) => Promise<void>
   selectClawTopic: (clawId: string, clawName?: string) => Promise<void>
   sendMessage: (text: string) => Promise<void>
+  switchWorkspace: (topic: string) => void
   createWorkspace: (name: string) => Promise<void>
   createChannel: (name: string) => Promise<void>
   getUserName: (userId: string) => string
@@ -125,6 +126,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const { state: authState } = useAuth()
   const [state, dispatch] = useReducer(chatReducer, initialState)
   const clientRef = useRef<TinodeClient | null>(null)
+  const activeWorkspaceRef = useRef<string | null>(null)
   const clawPollRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const clawIdRef = useRef<string | null>(null)
   const clawSeenIdsRef = useRef<Set<string>>(new Set())
@@ -193,6 +195,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
         // Load workspaces and channels
         const workspaces = client.getWorkspaces()
         const activeWorkspace = workspaces[0]?.topic ?? null
+        activeWorkspaceRef.current = activeWorkspace
         dispatch({ type: 'SET_WORKSPACES', workspaces, activeWorkspace })
 
         const channels = client.getChannels()
@@ -412,13 +415,31 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     await client.refreshMe()
 
     const workspaces = client.getWorkspaces()
-    const activeWorkspace = workspaces[0]?.topic ?? null
+    // Preserve current active workspace if it still exists, otherwise pick first
+    const current = activeWorkspaceRef.current
+    const stillExists = current && workspaces.some(w => w.topic === current)
+    const activeWorkspace = stillExists ? current : (workspaces[0]?.topic ?? null)
+    activeWorkspaceRef.current = activeWorkspace
     dispatch({ type: 'SET_WORKSPACES', workspaces, activeWorkspace })
 
     const channels = client.getChannels()
     dispatch({ type: 'SET_CHANNELS', channels })
     return channels
   }, [])
+
+  const switchWorkspace = useCallback((topic: string) => {
+    activeWorkspaceRef.current = topic
+    dispatch({ type: 'SET_WORKSPACES', workspaces: state.workspaces, activeWorkspace: topic })
+
+    // Auto-select first channel belonging to this workspace
+    const firstChannel = state.channels.find(c => !c.isP2P && c.parent === topic)
+    if (firstChannel) {
+      selectTopic(firstChannel.topic)
+    } else {
+      // No channels — clear active topic
+      dispatch({ type: 'SET_TOPIC', topic: '', messages: [] })
+    }
+  }, [state.workspaces, state.channels, selectTopic])
 
   const createWorkspace = useCallback(async (name: string) => {
     const client = clientRef.current
@@ -451,7 +472,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   const myUserId = clientRef.current?.myUserId ?? null
 
   return (
-    <ChatContext.Provider value={{ state, selectTopic, selectClawTopic, sendMessage, createWorkspace, createChannel, getUserName, getMembers, myUserId }}>
+    <ChatContext.Provider value={{ state, selectTopic, selectClawTopic, sendMessage, switchWorkspace, createWorkspace, createChannel, getUserName, getMembers, myUserId }}>
       {children}
     </ChatContext.Provider>
   )

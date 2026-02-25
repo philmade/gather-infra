@@ -9,7 +9,6 @@ import DetailPanel from './components/Detail/DetailPanel'
 import WebTopFullscreen from './components/WebTopFullscreen'
 import DeployAgentModal from './components/DeployModal/DeployAgentModal'
 import SettingsView from './components/Settings/SettingsView'
-import WorkspaceOnboarding from './components/Onboarding/WorkspaceOnboarding'
 import { useWorkspace } from './context/WorkspaceContext'
 import { listClaws } from './lib/api'
 import { useEffect, useRef, useState } from 'react'
@@ -36,11 +35,6 @@ function ChatGate({ children }: { children: ReactNode }) {
         )}
       </div>
     )
-  }
-
-  // Connected but no workspaces — onboarding
-  if (state.workspaces.length === 0) {
-    return <WorkspaceOnboarding />
   }
 
   return <>{children}</>

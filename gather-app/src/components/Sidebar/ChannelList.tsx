@@ -10,7 +10,9 @@ export default function ChannelList() {
   const [newName, setNewName] = useState('')
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const liveChannels = chatState.channels.filter(c => !c.isP2P)
+  const liveChannels = chatState.channels.filter(
+    c => !c.isP2P && c.parent === chatState.activeWorkspace
+  )
 
   // Auto-select first channel when live channels load
   useEffect(() => {
