@@ -60,11 +60,16 @@ Available builtins: `http_get(url)`, `http_post(url, body, type)`, `read_file(pa
 ├── core-version          # Version string (e.g. "0.655")
 ├── src/                  # Full Go source code (read-only, agent can inspect)
 │   ├── core/             # Core infrastructure source
-│   │   ├── orchestrator.go
-│   │   ├── model.go
-│   │   ├── tools/        # Built-in tool implementations
-│   │   ├── agents/       # Sub-agent configurations
-│   │   └── connectors/   # Matterbridge client
+│   │   ├── clay.go             # BuildClayAgent wiring + orchestrator prompt
+│   │   ├── resources.go        # SharedResources, tool builders, utilities
+│   │   ├── model.go            # LLM provider setup
+│   │   ├── loop_resilient.go   # Generic dual-agent loop with retry
+│   │   ├── loop_build.go       # Build loop + generator/reviewer prompts
+│   │   ├── loop_ops.go         # Ops loop + operator/reviewer prompts
+│   │   ├── loop_research.go    # Research loop + researcher/reviewer prompts
+│   │   ├── tools/              # Built-in tool implementations
+│   │   ├── agents/             # Sub-agent configurations
+│   │   └── connectors/         # Matterbridge client
 │   ├── extensions/       # Go extensions (compile-time)
 │   ├── cmd/              # Binary entry points (medic, bridge, proxy)
 │   └── main.go           # Agent entry point
@@ -108,7 +113,12 @@ gather-claw/
 │   ├── main.go             # Entry point (loads core + extensions)
 │   ├── core/
 │   │   ├── VERSION         # e.g. "0.655"
-│   │   ├── orchestrator.go # Coordinator setup, sub-agent wiring
+│   │   ├── clay.go              # BuildClayAgent wiring + orchestrator prompt
+│   │   ├── resources.go         # SharedResources, tool builders, utilities
+│   │   ├── loop_resilient.go    # Generic dual-agent loop with retry
+│   │   ├── loop_build.go        # Build loop + prompts
+│   │   ├── loop_ops.go          # Ops loop + prompts
+│   │   ├── loop_research.go     # Research loop + prompts
 │   │   ├── model.go        # LLM provider setup (anthropic/gemini)
 │   │   ├── tools/          # Built-in tools (memory, soul, fs, research, claude, skills, build, starlark)
 │   │   ├── agents/         # Sub-agent configs (memory, soul, coding, claude, research)

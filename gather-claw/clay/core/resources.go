@@ -65,6 +65,16 @@ func BuildSharedResources(ctx context.Context) (*SharedResources, error) {
 	}, nil
 }
 
+// opsDir returns the standard ops handoff directory.
+// MANUAL.md and FEEDBACK.md live here.
+func opsDir() string {
+	root := os.Getenv("CLAY_ROOT")
+	if root == "" {
+		root = "."
+	}
+	return root + "/data/ops"
+}
+
 // buildSubAgentsWithPrefix creates claude + research sub-agents with unique name prefixes.
 // Each caller gets its own instances (ADK sets parent pointers, so sharing
 // sub-agents between agent trees causes conflicts).
@@ -138,6 +148,31 @@ func buildCoordinatorTools(memTool *tools.MemoryTool, soul *tools.SoulTool, task
 	if platformTools != nil {
 		out = append(out, platformTools...)
 	}
+
+	return out, nil
+}
+
+// buildLightTools creates memory + soul + tasks — used by reviewers, operator, orchestrator.
+func buildLightTools(res *SharedResources) ([]tool.Tool, error) {
+	var out []tool.Tool
+
+	memoryTool, err := tools.NewConsolidatedMemoryTool(res.MemTool)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, memoryTool)
+
+	soulTool, err := tools.NewConsolidatedSoulTool(res.Soul)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, soulTool)
+
+	tasksTool, err := tools.NewConsolidatedTaskTool(res.TaskTool)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, tasksTool)
 
 	return out, nil
 }
