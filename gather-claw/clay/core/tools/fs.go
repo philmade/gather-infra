@@ -106,7 +106,7 @@ func (f *FSTool) Bash(command string) (string, error) {
 
 // Search finds files matching a pattern
 func (f *FSTool) Search(pattern string) ([]string, error) {
-	var matches []string
+	matches := []string{}
 
 	err := filepath.Walk(f.projectRoot, func(path string, info os.FileInfo, err error) error {
 		if err != nil {

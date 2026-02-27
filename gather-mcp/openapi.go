@@ -27,6 +27,7 @@ var tagToCategory = map[string]string{
 	"PoW":        "platform",
 	"Inbox":      "msg",
 	"Discover":   "platform",
+	"Email":      "email",
 }
 
 // LoadFromOpenAPI fetches the OpenAPI spec from gather-auth and populates the registry.
