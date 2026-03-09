@@ -64,6 +64,29 @@ const initialState: AuthState = {
   pendingInvite: null,
 }
 
+// Set the gather_session cookie so ForwardAuth works on claw subdomains.
+// This bridges PocketBase localStorage auth to a .gather.is domain cookie.
+async function setSessionCookie() {
+  if (!pb.authStore.token) return
+  try {
+    await fetch('/api/auth/set-session', {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + pb.authStore.token },
+    })
+  } catch {
+    // Non-critical — session-bridge will handle it on next claw visit
+  }
+}
+
+// Clear the gather_session cookie on sign out.
+async function clearSessionCookie() {
+  try {
+    await fetch('/api/auth/set-session', { method: 'DELETE' })
+  } catch {
+    // Non-critical
+  }
+}
+
 // Try to redeem a pending invite after auth succeeds
 async function tryRedeemInvite() {
   const token = localStorage.getItem('pending_invite')
@@ -137,6 +160,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (pb.authStore.isValid && pb.authStore.record) {
       // If already logged in and have a pending invite, redeem it
       tryRedeemInvite()
+      setSessionCookie()
       dispatch({ type: 'AUTH_SUCCESS', user: pb.authStore.record as RecordModel })
     } else {
       dispatch({ type: 'AUTH_LOADED' })
@@ -178,6 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // Redeem pending invite after OAuth success
       await tryRedeemInvite()
+      await setSessionCookie()
 
       dispatch({ type: 'AUTH_SUCCESS', user: authData.record })
     } catch (err) {
@@ -193,6 +218,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     try {
       const authData = await pb.collection('users').authWithPassword(email, password)
       await tryRedeemInvite()
+      await setSessionCookie()
       dispatch({ type: 'AUTH_SUCCESS', user: authData.record })
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err)
@@ -219,6 +245,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       })
       const authData = await pb.collection('users').authWithPassword(email, password)
       await tryRedeemInvite()
+      await setSessionCookie()
       dispatch({ type: 'AUTH_SUCCESS', user: authData.record })
     } catch (err) {
       const raw = err instanceof Error ? err.message : String(err)
@@ -275,6 +302,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     pb.authStore.clear()
     localStorage.removeItem('tinode_credentials')
     localStorage.removeItem('pending_invite')
+    clearSessionCookie()
     dispatch({ type: 'AUTH_LOGOUT' })
   }, [])
 

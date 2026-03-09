@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -674,6 +675,10 @@ const sessionCookieName = "gather_session"
 // HTML responses, and 302 redirects.
 func RegisterForwardAuthRoutes(mux *http.ServeMux, app *pocketbase.PocketBase) {
 	mux.HandleFunc("GET /api/auth/verify-session", handleVerifySession(app))
+	mux.HandleFunc("GET /api/auth/session-bridge", handleSessionBridge())
+	mux.HandleFunc("POST /api/auth/set-session", handleSetSession(app))
+	mux.HandleFunc("DELETE /api/auth/set-session", handleClearSession())
+	// Legacy debug-login (kept for backwards compatibility)
 	mux.HandleFunc("GET /api/auth/debug-login", handleDebugLoginPage())
 	mux.HandleFunc("POST /api/auth/debug-login", handleDebugLoginSubmit(app))
 }
@@ -791,7 +796,7 @@ func extractSubdomain(host string) (subdomain string, isDebug bool) {
 }
 
 // redirectToLogin builds the original URL from Traefik's forwarded headers
-// and redirects to the login page.
+// and redirects to the session bridge (SSO flow).
 func redirectToLogin(w http.ResponseWriter, r *http.Request) {
 	proto := r.Header.Get("X-Forwarded-Proto")
 	host := r.Header.Get("X-Forwarded-Host")
@@ -804,8 +809,73 @@ func redirectToLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	originalURL := proto + "://" + host + uri
-	loginURL := "https://gather.is/api/auth/debug-login?redirect=" + originalURL
-	http.Redirect(w, r, loginURL, http.StatusFound)
+	bridgeURL := "https://gather.is/api/auth/session-bridge?redirect=" + url.QueryEscape(originalURL)
+	http.Redirect(w, r, bridgeURL, http.StatusFound)
+}
+
+// handleSetSession validates a PocketBase auth token and sets the gather_session
+// cookie on .gather.is so ForwardAuth works across all claw subdomains.
+func handleSetSession(app *pocketbase.PocketBase) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if token == "" {
+			http.Error(w, "Missing token", http.StatusBadRequest)
+			return
+		}
+
+		record, err := app.FindAuthRecordByToken(token, core.TokenTypeAuth)
+		if err != nil || record == nil {
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		http.SetCookie(w, &http.Cookie{
+			Name:     sessionCookieName,
+			Value:    token,
+			Domain:   ".gather.is",
+			Path:     "/",
+			MaxAge:   604800, // 7 days
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteLaxMode,
+		})
+
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// handleClearSession removes the gather_session cookie.
+func handleClearSession() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		http.SetCookie(w, &http.Cookie{
+			Name:     sessionCookieName,
+			Value:    "",
+			Domain:   ".gather.is",
+			Path:     "/",
+			MaxAge:   -1,
+			HttpOnly: true,
+			Secure:   true,
+			SameSite: http.SameSiteLaxMode,
+		})
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// handleSessionBridge serves a minimal HTML page that bridges PocketBase
+// localStorage auth to the gather_session cookie. If the user is already
+// logged in (has a valid PocketBase token in localStorage), it calls
+// set-session to set the cookie and redirects back. Otherwise redirects
+// to /app for login.
+func handleSessionBridge() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		redirect := r.URL.Query().Get("redirect")
+		if redirect == "" {
+			redirect = "/"
+		}
+
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		fmt.Fprintf(w, sessionBridgeHTML, redirect)
+	}
 }
 
 // handleDebugLoginPage serves a minimal HTML login form.
@@ -964,5 +1034,56 @@ const debugLoginErrorHTML = `<!DOCTYPE html>
     <button type="submit">Sign in</button>
   </form>
 </div>
+</body>
+</html>`
+
+const sessionBridgeHTML = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gather — Signing in</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         background: #0a0a0a; color: #e0e0e0; display: flex; justify-content: center;
+         align-items: center; min-height: 100vh; }
+  .card { text-align: center; }
+  p { color: #888; font-size: 0.95rem; }
+</style>
+</head>
+<body>
+<div class="card">
+  <p>Signing in...</p>
+</div>
+<script>
+(function() {
+  var redirect = "%s";
+  var appUrl = "/app";
+  try {
+    var stored = localStorage.getItem("pocketbase_auth");
+    if (stored) {
+      var auth = JSON.parse(stored);
+      if (auth.token) {
+        fetch("/api/auth/set-session", {
+          method: "POST",
+          headers: { "Authorization": "Bearer " + auth.token },
+          credentials: "same-origin"
+        }).then(function(r) {
+          if (r.ok) {
+            window.location.href = redirect;
+          } else {
+            window.location.href = appUrl;
+          }
+        }).catch(function() {
+          window.location.href = appUrl;
+        });
+        return;
+      }
+    }
+  } catch(e) {}
+  window.location.href = appUrl;
+})();
+</script>
 </body>
 </html>`
