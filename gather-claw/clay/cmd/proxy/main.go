@@ -66,6 +66,11 @@ func main() {
 		proxy.ServeHTTP(w, r)
 	})
 
+	// ADK debugger UI → ADK
+	mux.HandleFunc("/ui/", func(w http.ResponseWriter, r *http.Request) {
+		proxy.ServeHTTP(w, r)
+	})
+
 	// Activity JSON with CORS for local dev
 	mux.HandleFunc("/activity.json", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
