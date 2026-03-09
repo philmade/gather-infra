@@ -144,6 +144,8 @@ func main() {
 			"/api/auth/health",
 			"/api/auth/verify-session",
 			"/api/auth/debug-login",
+			"/api/auth/session-bridge",
+			"/api/auth/set-session",
 			"/api/agents",
 			"/api/agents/{path...}",
 			"/help",
