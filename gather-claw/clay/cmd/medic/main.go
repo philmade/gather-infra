@@ -51,13 +51,22 @@ func adkPort() string {
 	return "8081"
 }
 
+func clayRestartCmd() string {
+	cmd := "cd " + projectRoot() + " && ./clay web -port " + adkPort() + " -write-timeout 10m api -sse-write-timeout 10m webui"
+	if addr := os.Getenv("ADK_WEBUI_ADDRESS"); addr != "" {
+		cmd += " -api_server_address " + addr
+	}
+	cmd += " > /tmp/adk-go.log 2>&1"
+	return cmd
+}
+
 var agents = map[string]agentConfig{
 	"clay": {
 		LogFile:        "/tmp/adk-go.log",
 		WorkingDir:     projectRoot(),
 		HealthURL:      "http://127.0.0.1:" + adkPort(),
 		ProcessPattern: "clay web",
-		RestartCmd:     "cd " + projectRoot() + " && ./clay web -port " + adkPort() + " api webui > /tmp/adk-go.log 2>&1",
+		RestartCmd:     clayRestartCmd(),
 	},
 	"clay-bridge": {
 		LogFile:        "/tmp/bridge.log",
