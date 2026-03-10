@@ -32,6 +32,7 @@ type ClawDeployment struct {
 	Instructions         string `json:"instructions,omitempty"`
 	GithubRepo           string `json:"github_repo,omitempty"`
 	ClawType             string `json:"claw_type"`
+	AgentType            string `json:"agent_type"`
 	UserID               string `json:"user_id"`
 	Subdomain            string `json:"subdomain,omitempty"`
 	ContainerID          string `json:"container_id,omitempty"`
@@ -48,6 +49,10 @@ type ClawDeployment struct {
 }
 
 func recordToClawDeployment(r *core.Record) ClawDeployment {
+	agentType := r.GetString("agent_type")
+	if agentType == "" {
+		agentType = "clay" // backwards compat
+	}
 	return ClawDeployment{
 		ID:                   r.Id,
 		Name:                 r.GetString("name"),
@@ -55,6 +60,7 @@ func recordToClawDeployment(r *core.Record) ClawDeployment {
 		Instructions:         r.GetString("instructions"),
 		GithubRepo:           r.GetString("github_repo"),
 		ClawType:             r.GetString("claw_type"),
+		AgentType:            agentType,
 		UserID:               r.GetString("user_id"),
 		Subdomain:            r.GetString("subdomain"),
 		ContainerID:          r.GetString("container_id"),
@@ -78,6 +84,7 @@ type DeployClawInput struct {
 		Instructions string `json:"instructions,omitempty" doc:"Initial instructions for the claw" maxLength:"2000"`
 		GithubRepo   string `json:"github_repo,omitempty" doc:"GitHub repo to connect (e.g. acme/repo)" maxLength:"200"`
 		ClawType     string `json:"claw_type,omitempty" doc:"Tier: lite (default), pro, max" maxLength:"50"`
+		AgentType    string `json:"agent_type,omitempty" doc:"Agent framework: clay (default), hermes, deerflow" maxLength:"20"`
 	}
 }
 
@@ -273,6 +280,14 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 			return nil, huma.Error422UnprocessableEntity("claw_type must be lite, pro, or max")
 		}
 
+		agentType := input.Body.AgentType
+		if agentType == "" {
+			agentType = "clay"
+		}
+		if agentType != "clay" && agentType != "hermes" && agentType != "deerflow" {
+			return nil, huma.Error422UnprocessableEntity("agent_type must be clay, hermes, or deerflow")
+		}
+
 		col, err := app.FindCollectionByNameOrId("claw_deployments")
 		if err != nil {
 			return nil, huma.Error500InternalServerError("claw_deployments collection not found")
@@ -285,6 +300,7 @@ func RegisterClawRoutes(api huma.API, app *pocketbase.PocketBase) {
 		record.Set("instructions", strings.TrimSpace(input.Body.Instructions))
 		record.Set("github_repo", strings.TrimSpace(input.Body.GithubRepo))
 		record.Set("claw_type", clawType)
+		record.Set("agent_type", agentType)
 
 		if err := app.Save(record); err != nil {
 			return nil, huma.Error500InternalServerError("Failed to create deployment")

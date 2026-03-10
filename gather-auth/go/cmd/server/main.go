@@ -2110,6 +2110,10 @@ func ensureClawDeploymentsCollection(app *pocketbase.PocketBase) error {
 			c.Fields.Add(&core.TextField{Name: "proxy_token", Max: 64})
 			changed = true
 		}
+		if c.Fields.GetByName("agent_type") == nil {
+			c.Fields.Add(&core.TextField{Name: "agent_type", Max: 20})
+			changed = true
+		}
 		if changed {
 			if err := app.Save(c); err != nil {
 				return fmt.Errorf("migrate claw_deployments collection: %w", err)
@@ -2147,6 +2151,7 @@ func ensureClawDeploymentsCollection(app *pocketbase.PocketBase) error {
 		&core.TextField{Name: "stripe_session_id", Max: 200},
 		&core.BoolField{Name: "trial_warned"},
 		&core.TextField{Name: "proxy_token", Max: 64},
+		&core.TextField{Name: "agent_type", Max: 20},
 		&core.AutodateField{Name: "created", OnCreate: true},
 	)
 	c.AddIndex("idx_claw_user", false, "user_id", "")
