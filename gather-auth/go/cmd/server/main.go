@@ -1824,6 +1824,7 @@ func provisionClaw(app *pocketbase.PocketBase, record *core.Record) {
 		"GATHER_AGENT_ID":   agentRec.Id,
 		"GATHER_CHANNEL_ID": channelID,
 		"GATHER_BASE_URL":   baseURL,
+		"ADK_WEBUI_ADDRESS": "https://" + subdomain + ".gather.is",
 	}
 	// LLM proxy — claw talks to gather-auth, not directly to upstream
 	proxyTokenBytes := make([]byte, 32)

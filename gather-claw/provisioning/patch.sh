@@ -98,8 +98,11 @@ patch_container() {
         RESTART="unless-stopped"
     fi
 
-    # Add ForwardAuth to main claw router + explicit service link
+    # ADK debugger UI needs to know the public URL for API calls
     local USERNAME="${CONTAINER#claw-}"
+    ENV_ARGS="$ENV_ARGS -e ADK_WEBUI_ADDRESS=https://${USERNAME}.gather.is"
+
+    # Add ForwardAuth to main claw router + explicit service link
     local MAIN_ROUTER="claw-${USERNAME}"
     local DEBUG_ROUTER="claw-${USERNAME}-debug"
     LABEL_ARGS="$LABEL_ARGS -l $(printf '%q' "traefik.http.routers.${MAIN_ROUTER}.middlewares=gather-forward-auth")"
