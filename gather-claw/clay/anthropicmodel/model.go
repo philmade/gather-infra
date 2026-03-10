@@ -310,11 +310,15 @@ func (m *Model) convertContentToMessage(content *genai.Content) *anthropicMessag
 			blocks = append(blocks, contentBlock{Type: "text", Text: part.Text})
 		}
 		if part.FunctionCall != nil {
+			input := part.FunctionCall.Args
+			if input == nil {
+				input = map[string]any{}
+			}
 			blocks = append(blocks, contentBlock{
 				Type:  "tool_use",
 				ID:    part.FunctionCall.ID,
 				Name:  part.FunctionCall.Name,
-				Input: part.FunctionCall.Args,
+				Input: input,
 			})
 		}
 		if part.FunctionResponse != nil {
