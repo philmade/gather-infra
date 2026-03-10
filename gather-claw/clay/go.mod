@@ -4,6 +4,7 @@ go 1.24.5
 
 require (
 	go.starlark.net v0.0.0-20260210143700-b62fd896b91b
+	golang.org/x/net v0.47.0
 	google.golang.org/adk v0.4.0
 	google.golang.org/genai v1.46.0
 	modernc.org/sqlite v1.34.5
@@ -39,7 +40,6 @@ require (
 	go.opentelemetry.io/otel/sdk v1.38.0 // indirect
 	go.opentelemetry.io/otel/trace v1.38.0 // indirect
 	golang.org/x/crypto v0.45.0 // indirect
-	golang.org/x/net v0.47.0 // indirect
 	golang.org/x/sync v0.18.0 // indirect
 	golang.org/x/sys v0.38.0 // indirect
 	golang.org/x/text v0.31.0 // indirect
