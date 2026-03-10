@@ -100,7 +100,7 @@ patch_container() {
 
     # ADK debugger UI needs to know the public URL for API calls
     local USERNAME="${CONTAINER#claw-}"
-    ENV_ARGS="$ENV_ARGS -e ADK_WEBUI_ADDRESS=https://${USERNAME}.gather.is"
+    ENV_ARGS="$ENV_ARGS -e ADK_WEBUI_ADDRESS=https://${USERNAME}.gather.is/api"
 
     # Add ForwardAuth to main claw router + explicit service link
     local MAIN_ROUTER="claw-${USERNAME}"
