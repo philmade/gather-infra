@@ -102,6 +102,82 @@ func newResilientLoop(name, description, reviewerStateKey string, maxIter uint, 
 	})
 }
 
+// newSoloLoop creates a loop agent that runs a single executor → control
+// in sequence (no reviewer). The executor must emit LOOP_DONE/LOOP_PAUSE itself.
+func newSoloLoop(name, description, stateKey string, maxIter uint, executor agent.Agent) (agent.Agent, error) {
+	controlName := name + "_control"
+
+	loopControl, err := newLoopControl(controlName, stateKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return agent.New(agent.Config{
+		Name:        name,
+		Description: description,
+		SubAgents:   []agent.Agent{executor, loopControl},
+		Run: func(ctx agent.InvocationContext) iter.Seq2[*session.Event, error] {
+			return func(yield func(*session.Event, error) bool) {
+				remaining := maxIter
+				iteration := 0
+				for {
+					iteration++
+					if maxIter > 0 {
+						if remaining == 0 {
+							log.Printf("%s: max iterations (%d) reached", name, maxIter)
+							return
+						}
+						remaining--
+					}
+
+					log.Printf("%s: iteration %d", name, iteration)
+					shouldExit := false
+
+					for _, sub := range ctx.Agent().SubAgents() {
+						success := false
+						for attempt := 1; attempt <= maxRetries; attempt++ {
+							errored := false
+							for event, err := range sub.Run(ctx) {
+								if err != nil {
+									log.Printf("%s: %s error (attempt %d/%d): %v",
+										name, sub.Name(), attempt, maxRetries, err)
+									errored = true
+									break
+								}
+								if event.Actions.Escalate {
+									log.Printf("%s: escalation event from %s (swallowed, not propagated)", name, sub.Name())
+									shouldExit = true
+									continue
+								}
+								if !yield(event, nil) {
+									return
+								}
+							}
+							if !errored {
+								success = true
+								break
+							}
+							if attempt < maxRetries {
+								backoff := time.Duration(attempt*2) * time.Second
+								log.Printf("%s: retrying %s in %s", name, sub.Name(), backoff)
+								time.Sleep(backoff)
+							}
+						}
+						if !success {
+							log.Printf("%s: %s failed after %d attempts, skipping",
+								name, sub.Name(), maxRetries)
+						}
+						if shouldExit {
+							log.Printf("%s: escalation received, exiting loop", name)
+							return
+						}
+					}
+				}
+			}
+		},
+	})
+}
+
 // newLoopControl creates a custom agent that reads the reviewer's state key
 // and escalates when LOOP_DONE or LOOP_PAUSE is detected.
 func newLoopControl(name, reviewerStateKey string) (agent.Agent, error) {

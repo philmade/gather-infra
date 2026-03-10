@@ -181,6 +181,44 @@ For Go source changes:
 NEVER call build_and_deploy without a passing build_check first.
 NEVER skip build_check to "save time" — failed deploys trigger restarts and waste more time.
 
+# Building Agent Capabilities
+
+When your parent asks you to build a new feature or system, build it as an
+agent capability — not a standalone program.
+
+## The extension point
+
+Your extension point is /app/src/extensions/extensions.go. It has two functions:
+- RegisterTools() — returns tools added to the orchestrator
+- RegisterAgents() — returns sub-agents added to the orchestrator
+
+After editing extensions and calling build_and_deploy, the new tools/agents
+are live and usable by the orchestrator on next restart.
+
+## Sub-agent pattern (from core/agents/claude.go):
+
+    func NewMyAgent(llm model.LLM, tools []tool.Tool) (agent.Agent, error) {
+        return llmagent.New(llmagent.Config{
+            Name:        "my_agent",
+            Description: "What this agent does",
+            Instruction: "Detailed instructions for the agent...",
+            Model:       llm,
+            Tools:       tools,
+        })
+    }
+
+## Tool pattern (from core/tools/function_tools.go):
+
+    t, err := functiontool.New(
+        functiontool.Config{Name: "my_tool", Description: "What it does"},
+        func(ctx tool.Context, args MyArgs) (MyResult, error) {
+            return MyResult{...}, nil
+        },
+    )
+
+Never create standalone daemons, HTTP servers, or programs with their own main().
+Everything you build should be callable by the agent via tool calls or sub-agent transfers.
+
 # Before Returning to Parent — Store Memories
 
 When you have finished your work, ALWAYS store TWO memories:

@@ -19,9 +19,8 @@ import (
 //	│   ├── generator      (full tools + claude/research)
 //	│   ├── build_reviewer (memory/soul/tasks)
 //	│   └── build_control  (escalates on LOOP_DONE)
-//	├── "ops_loop" (resilient loop — operation)
-//	│   ├── operator       (bash/research/memory — runs things)
-//	│   ├── ops_reviewer   (memory/soul/tasks)
+//	├── "ops_loop" (solo loop — operation)
+//	│   ├── operator       (bash/research/memory — runs things, self-directed)
 //	│   └── ops_control    (escalates on LOOP_DONE)
 //	└── "research_loop" (resilient loop — research)
 //	    ├── researcher     (web search/fetch/memory)
@@ -190,12 +189,21 @@ batch them together. For example: search memory + check tasks + read soul in one
 - If the message is a heartbeat with no pending work, respond with HEARTBEAT_OK.
 - Store a continuation memory at the end so the next session picks up where you left off.
 
+## Extension Sub-Agents
+
+The build loop can create new sub-agents via the extensions system
+(/app/src/extensions/extensions.go). After build_and_deploy, new agents
+become available as additional sub-agents you can transfer to.
+
+When the build loop creates a new capability, you can transfer directly
+to it for specialized work — no need to route through ops_loop.
+
 ## Sub-agents
 
 | Agent | What it does |
 |-------|-------------|
 | **build_loop** | Construction cycle (generator → build_reviewer, repeats until done) |
-| **ops_loop** | Operations cycle (operator → ops_reviewer, repeats until done) |
+| **ops_loop** | Operations cycle (operator executes, repeats until done) |
 | **research_loop** | Research cycle (researcher → research_reviewer, repeats until done) |
 `, handoffDir))
 
