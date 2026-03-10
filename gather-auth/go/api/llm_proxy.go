@@ -63,24 +63,25 @@ func handleLLMProxy(app *pocketbase.PocketBase) http.HandlerFunc {
 		claw := records[0]
 		clawID := claw.Id
 
-		// 3. Determine tier and check quotas
-		clawType := claw.GetString("claw_type")
-		tier, ok := tiers[clawType]
-		if !ok {
-			tier = tiers["lite"] // default to lite
-		}
-
-		if err := checkQuota(app, clawID, tier); err != nil {
-			if err == errMonthlyCapExceeded {
-				writeAnthropicError(w, 403, "permission_error",
-					"Monthly token quota exceeded. Upgrade your plan or wait for next billing cycle.")
-				return
-			}
-			// Rolling window exceeded
-			writeAnthropicError(w, 429, "rate_limit_error",
-				"Rate limit exceeded. Please wait before making more requests.")
-			return
-		}
+		// 3. Quota enforcement — PAUSED
+		// TODO: Re-enable when we have real billing tiers. Currently all claws
+		// hit MiniMax on our credits, so self-imposed limits just block usage.
+		//
+		// clawType := claw.GetString("claw_type")
+		// tier, ok := tiers[clawType]
+		// if !ok {
+		// 	tier = tiers["lite"]
+		// }
+		// if err := checkQuota(app, clawID, tier); err != nil {
+		// 	if err == errMonthlyCapExceeded {
+		// 		writeAnthropicError(w, 403, "permission_error",
+		// 			"Monthly token quota exceeded. Upgrade your plan or wait for next billing cycle.")
+		// 		return
+		// 	}
+		// 	writeAnthropicError(w, 429, "rate_limit_error",
+		// 		"Rate limit exceeded. Please wait before making more requests.")
+		// 	return
+		// }
 
 		// 4. Read request body (limit 1MB)
 		body, err := io.ReadAll(io.LimitReader(r.Body, 1<<20))
