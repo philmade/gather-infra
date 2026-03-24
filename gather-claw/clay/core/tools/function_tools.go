@@ -267,6 +267,34 @@ func NewResearchTools() ([]tool.Tool, error) {
 	return out, nil
 }
 
+// NewReadTool creates a standalone read tool.
+func NewReadTool(fs *FSTool) (tool.Tool, error) {
+	return functiontool.New(
+		functiontool.Config{Name: "read", Description: "Read a file or list a directory"},
+		func(ctx tool.Context, args FSReadArgs) (FSReadResult, error) {
+			content, err := fs.Read(args.Path)
+			if err != nil {
+				return FSReadResult{}, err
+			}
+			return FSReadResult{Content: content}, nil
+		},
+	)
+}
+
+// NewSearchTool creates a standalone search tool.
+func NewSearchTool(fs *FSTool) (tool.Tool, error) {
+	return functiontool.New(
+		functiontool.Config{Name: "search", Description: "Search for files matching a glob pattern"},
+		func(ctx tool.Context, args FSSearchArgs) (FSSearchResult, error) {
+			matches, err := fs.Search(args.Pattern)
+			if err != nil {
+				return FSSearchResult{}, err
+			}
+			return FSSearchResult{Matches: matches, Count: len(matches)}, nil
+		},
+	)
+}
+
 // NewOrchestratorTools creates read-only filesystem tools for the orchestrator:
 // read, search, bash — no write, edit, or build.
 func NewOrchestratorTools() ([]tool.Tool, error) {
@@ -399,12 +427,12 @@ func NewClaudeTools() ([]tool.Tool, error) {
 	}
 	out = append(out, t)
 
-	// Build tool — compile and hot-swap
-	buildTools, err := NewBuildTools()
+	// Build tool — check compilation or compile + deploy
+	buildTool, err := NewBuildTool()
 	if err != nil {
 		return nil, err
 	}
-	out = append(out, buildTools...)
+	out = append(out, buildTool)
 
 	return out, nil
 }

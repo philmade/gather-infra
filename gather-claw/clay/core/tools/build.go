@@ -19,41 +19,28 @@ const (
 	buildTimeout           = 180 * time.Second
 )
 
-// NewBuildTools creates the build_check and build_and_deploy tools.
-func NewBuildTools() ([]tool.Tool, error) {
-	var out []tool.Tool
+// BuildArgs for the unified build tool.
+type BuildArgs struct {
+	Deploy bool   `json:"deploy,omitempty" jsonschema:"If true, compile AND hot-swap the running binary. If false (default), just check compilation."`
+	Reason string `json:"reason,omitempty" jsonschema:"(deploy only) Why you're deploying"`
+}
 
-	// build_check — compile only, no deploy. Use this to iterate on errors.
-	check, err := functiontool.New(
+// NewBuildTool creates a single unified build tool that checks compilation
+// and optionally deploys. deploy=false (default) checks only. deploy=true
+// compiles and hot-swaps.
+func NewBuildTool() (tool.Tool, error) {
+	return functiontool.New(
 		functiontool.Config{
-			Name:        "build_check",
-			Description: "Check if your source code compiles without deploying. Returns all compilation errors across all packages at once. Use this to iterate on fixes before calling build_and_deploy.",
+			Name:        "build",
+			Description: "Compile your Go source code. By default just checks compilation and returns errors. Set deploy=true to also hot-swap the running binary. Always check first (deploy=false), fix errors, then deploy.",
 		},
-		func(ctx tool.Context, args BuildRequestArgs) (BuildRequestResult, error) {
+		func(ctx tool.Context, args BuildArgs) (BuildRequestResult, error) {
+			if args.Deploy {
+				return requestBuild(args.Reason)
+			}
 			return requestCheck()
 		},
 	)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, check)
-
-	// build_and_deploy — compile + hot-swap
-	deploy, err := functiontool.New(
-		functiontool.Config{
-			Name:        "build_and_deploy",
-			Description: "Tarball your source code, send it to the build service for compilation, and deploy the new binary. If compilation fails, you get the error output. If it succeeds, medic will hot-swap the binary and restart you. Use build_check first to verify compilation.",
-		},
-		func(ctx tool.Context, args BuildRequestArgs) (BuildRequestResult, error) {
-			return requestBuild(args.Reason)
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
-	out = append(out, deploy)
-
-	return out, nil
 }
 
 func requestCheck() (BuildRequestResult, error) {

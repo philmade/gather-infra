@@ -129,11 +129,11 @@ func buildCoordinatorTools(memTool *tools.MemoryTool, soul *tools.SoulTool, task
 	}
 	out = append(out, tasksTool)
 
-	buildTools, err := tools.NewBuildTools()
+	buildTool, err := tools.NewBuildTool()
 	if err != nil {
 		return nil, err
 	}
-	out = append(out, buildTools...)
+	out = append(out, buildTool)
 
 	extTools, err := tools.NewExtensionTools()
 	if err != nil {
