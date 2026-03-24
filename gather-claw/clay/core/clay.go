@@ -21,40 +21,59 @@ import (
 //	├── "research" (web_search, webfetch, memory — finds information)
 //	└── "review"   (memory, read, search — catalyst, directs next steps)
 func BuildClayAgent(res *SharedResources, cfg OrchestratorConfig) (agent.Agent, error) {
-	// Clay tools: filesystem + memory + build. That's it.
+
+	// ---------------------------------------------------------------
+	// 1. Clay — the main agent's tools
+	//    read, write, edit, bash, search, build (from NewClaudeTools)
+	//    + memory
+	//    + any tools registered by Go extensions
+	// ---------------------------------------------------------------
+
 	clayTools, err := tools.NewClaudeTools()
 	if err != nil {
 		return nil, fmt.Errorf("claude tools: %w", err)
 	}
 
-	memoryTool, err := tools.NewConsolidatedMemoryTool(res.MemTool)
+	clayMemory, err := tools.NewConsolidatedMemoryTool(res.MemTool)
 	if err != nil {
-		return nil, fmt.Errorf("memory tool: %w", err)
+		return nil, fmt.Errorf("clay memory tool: %w", err)
 	}
-	clayTools = append(clayTools, memoryTool)
+	clayTools = append(clayTools, clayMemory)
 
-	// Extension tools from config (registered Go extensions, not the starlark management tools)
+	// SELF-MODIFICATION HOOK: When a claw builds itself a new tool by editing
+	// /app/src/extensions/extensions.go → RegisterTools() and calling
+	// build(deploy=true), that tool appears here on the next restart.
+	// This is how claws extend their own capabilities at runtime.
 	clayTools = append(clayTools, cfg.ExtensionTools...)
 
-	// --- Sub-agents ---
+	// ---------------------------------------------------------------
+	// 2. Research sub-agent
+	//    web_search, webfetch, memory
+	//    Finds information from the web on clay's behalf.
+	// ---------------------------------------------------------------
 
-	// Research: web_search + webfetch + memory
 	researchTools, err := tools.NewResearchTools()
 	if err != nil {
 		return nil, fmt.Errorf("research tools: %w", err)
 	}
-	researchMemTool, err := tools.NewConsolidatedMemoryTool(res.MemTool)
+	researchMemory, err := tools.NewConsolidatedMemoryTool(res.MemTool)
 	if err != nil {
 		return nil, fmt.Errorf("research memory tool: %w", err)
 	}
-	researchTools = append(researchTools, researchMemTool)
+	researchTools = append(researchTools, researchMemory)
 
 	researchAgent, err := agents.NewResearchAgent(res.Model, researchTools, "")
 	if err != nil {
 		return nil, fmt.Errorf("research agent: %w", err)
 	}
 
-	// Review: memory + read + search (reads soul/tasks via filesystem)
+	// ---------------------------------------------------------------
+	// 3. Review sub-agent
+	//    memory, read, search
+	//    Evaluates progress by reading soul/task files and memory.
+	//    Directs what clay should do next.
+	// ---------------------------------------------------------------
+
 	reviewTools, err := buildReviewTools(res)
 	if err != nil {
 		return nil, fmt.Errorf("review tools: %w", err)
@@ -64,7 +83,16 @@ func BuildClayAgent(res *SharedResources, cfg OrchestratorConfig) (agent.Agent, 
 		return nil, fmt.Errorf("review agent: %w", err)
 	}
 
+	// ---------------------------------------------------------------
+	// Assemble: clay agent = tools + sub-agents + instruction prompt
+	// ---------------------------------------------------------------
+
 	subAgents := []agent.Agent{researchAgent, reviewAgent}
+
+	// SELF-MODIFICATION HOOK: When a claw builds itself a new sub-agent by
+	// editing /app/src/extensions/extensions.go → RegisterAgents() and calling
+	// build(deploy=true), that agent appears here on the next restart.
+	// Clay can then transfer to it like any other sub-agent.
 	subAgents = append(subAgents, cfg.ExtensionAgents...)
 
 	return llmagent.New(llmagent.Config{

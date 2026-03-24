@@ -13,13 +13,20 @@ import (
 	"google.golang.org/adk/tool"
 )
 
-// OrchestratorConfig configures the Clay agent.
+// OrchestratorConfig carries self-modification extensions into the clay agent.
+//
+// When a claw edits /app/src/extensions/extensions.go and calls build(deploy=true),
+// it can register new tools (RegisterTools) and sub-agents (RegisterAgents).
+// main.go loads these at startup and passes them here. BuildClayAgent appends
+// them to clay's tool list and sub-agent list — see SELF-MODIFICATION HOOK
+// comments in clay.go.
 type OrchestratorConfig struct {
-	// ExtensionTools are additional tools registered by extensions,
-	// added to the coordinator's direct tool set.
+	// ExtensionTools are tools the claw built for itself.
+	// Appended to clay's direct tool set.
 	ExtensionTools []tool.Tool
 
-	// ExtensionAgents are additional sub-agents registered by extensions.
+	// ExtensionAgents are sub-agents the claw built for itself.
+	// Appended to clay's sub-agent list (clay can transfer to them).
 	ExtensionAgents []agent.Agent
 }
 

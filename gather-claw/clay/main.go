@@ -23,7 +23,12 @@ import (
 func main() {
 	ctx := context.Background()
 
-	// Load extension tools and agents
+	// SELF-MODIFICATION ENTRY POINT
+	// Claws can extend themselves by editing /app/src/extensions/extensions.go
+	// and calling build(deploy=true). On restart, RegisterTools() and
+	// RegisterAgents() return whatever the claw registered — these get
+	// injected into clay's tool list and sub-agent list via OrchestratorConfig.
+	// See the matching SELF-MODIFICATION HOOK comments in core/clay.go.
 	extTools, err := extensions.RegisterTools()
 	if err != nil {
 		log.Fatalf("Failed to load extension tools: %v", err)
